@@ -46,6 +46,22 @@ pre-commit install --hook-type commit-msg
 
 ---
 
+## PR labels (GitStream)
+
+Labels are applied automatically by [gitStream](https://gitstream.cm) based on the PR contents:
+
+| Label | Meaning |
+|-------|--------|
+| `invalid-pr-title` | PR title does not follow `[BHB-XX] description` (e.g. `[BHB-42] Add user auth`) |
+| `missing-tests` | No test-related files in the PR (no `test_*`, `*_test.py`, or paths under `tests/`) |
+| `deleted-files` | PR includes one or more file deletions |
+| `docs-only` | All changed files are documentation only |
+| `migrations` | PR touches Django migration files under `migrations/` |
+| `migrations + missing-tests` | PR has migration files but no test files |
+| `python` | PR includes at least one `.py` file |
+
+---
+
 ## Scripts
 
 | Command | Description |
