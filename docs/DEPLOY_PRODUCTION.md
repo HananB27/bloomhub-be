@@ -2,30 +2,26 @@
 
 ## How production deploy is triggered
 
-- **Option A – Push to `main`:** Pushing or merging to `main` runs the **Deploy Production** workflow (`.github/workflows/deploy-production.yml`). It:
-  1. Runs **migrations** against the production database (using `PROD_DATABASE_URL`).
-  2. Then you add your actual deploy step (e.g. deploy to Railway, Render, Fly, or a server).
+Production deploys **only when you run the workflow manually**:
 
-- **Option B – Manual run:** You can also run the same workflow from the **Actions** tab → **Deploy Production** → **Run workflow**.
+1. Open the repo on GitHub → **Actions**
+2. Select **Deploy Production** in the left sidebar
+3. Click **Run workflow** (dropdown on the right) → **Run workflow**
+
+The workflow will:
+
+1. Run **migrations** against the production database (using `PROD_DATABASE_URL`)
+2. Run the **Deploy to production** step (add your real deploy command in the workflow)
 
 ## What you need to do
 
-1. **Add secret `PROD_DATABASE_URL`**
-   - **Settings** → **Secrets and variables** → **Actions**
-   - New repository secret: `PROD_DATABASE_URL` = your Neon **production** (root branch) connection string.
-   - Use the URL from your Neon dashboard; never commit it in the repo.
+1. **Add secret `PROD_DATABASE_URL`**  
+   **Settings** → **Secrets and variables** → **Actions** → New repository secret: `PROD_DATABASE_URL` = your Neon production connection string.
 
-2. **Optional: GitHub Environment “production”**
-   - **Settings** → **Environments** → **New environment** → name it `production`.
-   - You can add protection rules (e.g. required reviewers) so production only deploys after approval.
-   - In the workflow we use `environment: production` so it uses this environment and its secrets.
+2. **Optional: GitHub Environment “production”**  
+   **Settings** → **Environments** → New environment → name it `production`. You can add protection rules (e.g. required reviewers). The workflow uses `environment: production`.
 
-3. **Add your deploy step**
-   - Edit `.github/workflows/deploy-production.yml`.
-   - After the “Run migrations (production)” step, add the step that deploys your app, for example:
-     - **Railway:** use `railway up` or Railway’s GitHub integration.
-     - **Render:** use Render’s GitHub integration or their API/CLI.
-     - **Fly.io:** `fly deploy`.
-     - **VPS:** SSH + pull + restart gunicorn/systemd.
+3. **Add your deploy step**  
+   Edit `.github/workflows/deploy-production.yml` and replace the placeholder “Deploy to production” step with your host’s deploy (e.g. Railway, Render, Fly, or SSH + restart). Add any required secrets (e.g. `PROD_DEPLOY_SECRET`, API tokens) in repo Secrets.
 
-So: **production push = merge to `main` (or manual run)** → workflow runs prod migrations → you add your deploy step to complete the push.
+See **docs/DEPLOY_OVERVIEW.md** for the full dev vs prod flow.

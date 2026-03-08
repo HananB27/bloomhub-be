@@ -1,14 +1,12 @@
-# Production deploy: run migrations then deploy (trigger on push to main or manual)
+# Deploy to PROD only when you run it manually (Actions → Deploy Production → Run workflow)
 name: Deploy Production
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 jobs:
-  migrate-prod:
-    name: Run migrations (production)
+  deploy-prod:
+    name: Migrate and deploy to production
     runs-on: ubuntu-latest
     environment: production
     steps:
@@ -30,7 +28,11 @@ jobs:
           DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
         run: python manage.py migrate --noinput
 
-      # Add your deploy step here, e.g.:
-      # - name: Deploy to Railway / Render / Fly
-      #   run: ...
-      # Or trigger an external deploy (webhook, CLI) using PROD_DATABASE_URL only for migrate above.
+      - name: Deploy to production
+        env:
+          PROD_DEPLOY_SECRET: ${{ secrets.PROD_DEPLOY_SECRET }}
+        run: |
+          echo "Deploy to prod: add your command above (e.g. Railway, Render, Fly). Set PROD_DEPLOY_SECRET or other secrets as needed."
+          if [ -n "$PROD_DEPLOY_SECRET" ]; then
+            echo "PROD_DEPLOY_SECRET is set. Add your deploy command here."
+          fi
