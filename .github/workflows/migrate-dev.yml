@@ -1,0 +1,33 @@
+# Run migrations on dev when there are new migration files
+name: Migrate Dev
+
+on:
+  push:
+    branches: [dev]
+    paths:
+      - "**/migrations/**/*.py"
+      - "!**/migrations/__init__.py"
+
+jobs:
+  migrate-dev:
+    name: Run migrations on dev
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run migrations (dev)
+        env:
+          DATABASE_URL: ${{ secrets.DEV_DATABASE_URL }}
+        run: python manage.py migrate --noinput
+        # Add DEV_DATABASE_URL in repo Secrets for this to run against Neon dev DB.

@@ -1,0 +1,18 @@
+# -*- mode: yaml -*-
+manifest:
+  version: 1.0
+
+automations:
+  enforce_pr_title_bhb:
+    if:
+      - {{ not (pr.title | match(regex=r/^\[BHB-\d+\]\s+.+$/)) }}
+    run:
+      - action: add-comment@v1
+        args:
+          comment: |
+            **PR title must follow:** `[BHB-XX] description`
+            Example: `[BHB-42] Add user auth`
+      - action: add-label@v1
+        args:
+          label: "invalid-pr-title"
+          color: "b60205"

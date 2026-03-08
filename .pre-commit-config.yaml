@@ -1,0 +1,19 @@
+repos:
+  - repo: https://github.com/psf/black
+    rev: 24.10.0
+    hooks:
+      - id: black
+        language_version: python3
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.4
+    hooks:
+      - id: ruff
+        args: [--fix]
+  - repo: local
+    hooks:
+      - id: commit-message-bhb
+        name: commit message [BHB-XX]
+        entry: bash -c 'head -1 "$1" | grep -qE "^\[BHB-[0-9]+\] " || { echo "Commit message must match [BHB-XX] description"; exit 1; }'
+        language: system
+        stages: [commit-msg]
+        pass_filenames: true

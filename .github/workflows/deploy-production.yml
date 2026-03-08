@@ -1,0 +1,36 @@
+# Production deploy: run migrations then deploy (trigger on push to main or manual)
+name: Deploy Production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  migrate-prod:
+    name: Run migrations (production)
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run migrations (production)
+        env:
+          DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
+        run: python manage.py migrate --noinput
+
+      # Add your deploy step here, e.g.:
+      # - name: Deploy to Railway / Render / Fly
+      #   run: ...
+      # Or trigger an external deploy (webhook, CLI) using PROD_DATABASE_URL only for migrate above.
