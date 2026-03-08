@@ -40,6 +40,8 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "storages",
+    "core",
 ]
 
 MIDDLEWARE = [
@@ -106,3 +108,39 @@ STATIC_URL = "static/"
 STATIC_ROOT = os.environ.get("STATIC_ROOT", "staticfiles")
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+R2_ACCOUNT_ID = os.environ.get("R2_ACCOUNT_ID", "").strip()
+R2_ACCESS_KEY_ID = os.environ.get("R2_ACCESS_KEY_ID", "").strip()
+R2_SECRET_ACCESS_KEY = os.environ.get("R2_SECRET_ACCESS_KEY", "").strip()
+R2_BUCKET_NAME = os.environ.get("R2_BUCKET_NAME", "bloomhub").strip()
+USE_R2 = bool(
+    R2_ACCOUNT_ID and R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY and R2_BUCKET_NAME
+)
+
+if USE_R2:
+    R2_ENDPOINT_URL = f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+    AWS_ACCESS_KEY_ID = R2_ACCESS_KEY_ID
+    AWS_SECRET_ACCESS_KEY = R2_SECRET_ACCESS_KEY
+    AWS_STORAGE_BUCKET_NAME = R2_BUCKET_NAME
+    AWS_S3_ENDPOINT_URL = R2_ENDPOINT_URL
+    AWS_S3_REGION_NAME = "auto"
+    AWS_S3_FILE_OVERWRITE = False
+
+    _r2_verify_env = os.environ.get("R2_VERIFY_SSL", "").lower()
+    if _r2_verify_env in ("0", "false", "no"):
+        AWS_S3_VERIFY = False
+    elif _r2_verify_env in ("1", "true", "yes"):
+        AWS_S3_VERIFY = True
+    else:
+        AWS_S3_VERIFY = not DEBUG
+    STORAGES = {
+        "default": {
+            "BACKEND": "config.storage.R2Storage",
+            "OPTIONS": {"verify": AWS_S3_VERIFY},
+        },
+        "staticfiles": {
+            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+        },
+    }
+else:
+    STORAGES = {}
