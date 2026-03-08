@@ -59,8 +59,28 @@ automations:
           label: "docs-only"
 
   label_migrations:
+    # Only add "migrations" when PR also has test files (otherwise use "migrations + missing-tests")
     if:
       - "{{ files | match(regex=r/\/migrations\/[\s\S]*\.py$/) | some }}"
+      - "{{ files | match(regex=r/test_/) | some }}"
+    run:
+      - action: add-label@v1
+        args:
+          label: "migrations"
+
+  label_migrations_also_test_suffix:
+    if:
+      - "{{ files | match(regex=r/\/migrations\/[\s\S]*\.py$/) | some }}"
+      - "{{ files | match(regex=r/_test\.py/) | some }}"
+    run:
+      - action: add-label@v1
+        args:
+          label: "migrations"
+
+  label_migrations_also_tests_dir:
+    if:
+      - "{{ files | match(regex=r/\/migrations\/[\s\S]*\.py$/) | some }}"
+      - "{{ files | match(regex=r/\/tests\//) | some }}"
     run:
       - action: add-label@v1
         args:

@@ -56,8 +56,8 @@ Labels are applied automatically by [gitStream](https://gitstream.cm) based on t
 | `missing-tests` | No test-related files in the PR (no `test_*`, `*_test.py`, or paths under `tests/`) |
 | `deleted-files` | PR includes one or more file deletions |
 | `docs-only` | All changed files are documentation only |
-| `migrations` | PR touches Django migration files under `migrations/` |
-| `migrations + missing-tests` | PR has migration files but no test files |
+| `migrations` | PR touches migration files under `migrations/` and also includes test files |
+| `migrations + missing-tests` | PR has migration files but no test files (only one of these two applies per PR) |
 | `python` | PR includes at least one `.py` file |
 
 ---
