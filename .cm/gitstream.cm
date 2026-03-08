@@ -2,6 +2,22 @@
 manifest:
   version: 1.0
 
+colors:
+  red: "b60205"
+  yellow: "fbca04"
+  green: "00a500"
+  orange: "d93f0b"
+  purple: "5319d7"
+  orange_deleted: "d09c04"
+  blue_docs: "0075ca"
+  light_blue: "c5d0f5"
+  purple_migrations: "5319d7"
+  blue_python: "1d76db"
+
+# Reusable checks for labels (no < > == != in expressions)
+has:
+  deleted_files: "{{ source.diff.files | map(attr='new_file') | match(term='/dev/null') | some }}"
+
 automations:
   enforce_pr_title_bhb:
     if:
@@ -10,9 +26,81 @@ automations:
       - action: add-comment@v1
         args:
           comment: |
-            **PR title must follow:** `[BHB-XX] description`
-            Example: `[BHB-42] Add user auth`
+            PR title must follow [BHB-XX] description.
+            Example [BHB-42] Add user auth
       - action: add-label@v1
         args:
           label: "invalid-pr-title"
-          color: "b60205"
+
+  label_prs_without_tests:
+    if:
+      - "{{ files | match(regex=r/test_/) | nope }}"
+      - "{{ files | match(regex=r/_test\.py/) | nope }}"
+      - "{{ files | match(regex=r/\/tests\//) | nope }}"
+    run:
+      - action: add-label@v1
+        args:
+          label: "missing-tests"
+
+  label_deleted_files:
+    if:
+      - "{{ has.deleted_files }}"
+    run:
+      - action: add-label@v1
+        args:
+          label: "deleted-files"
+
+  label_docs_only:
+    if:
+      - "{{ files | allDocs }}"
+    run:
+      - action: add-label@v1
+        args:
+          label: "docs-only"
+
+  label_migrations:
+    # Only add "migrations" when PR also has test files (otherwise use "migrations + missing-tests")
+    if:
+      - "{{ files | match(regex=r/\/migrations\/[\s\S]*\.py$/) | some }}"
+      - "{{ files | match(regex=r/test_/) | some }}"
+    run:
+      - action: add-label@v1
+        args:
+          label: "migrations"
+
+  label_migrations_also_test_suffix:
+    if:
+      - "{{ files | match(regex=r/\/migrations\/[\s\S]*\.py$/) | some }}"
+      - "{{ files | match(regex=r/_test\.py/) | some }}"
+    run:
+      - action: add-label@v1
+        args:
+          label: "migrations"
+
+  label_migrations_also_tests_dir:
+    if:
+      - "{{ files | match(regex=r/\/migrations\/[\s\S]*\.py$/) | some }}"
+      - "{{ files | match(regex=r/\/tests\//) | some }}"
+    run:
+      - action: add-label@v1
+        args:
+          label: "migrations"
+
+  label_migrations_without_tests:
+    if:
+      - "{{ files | match(regex=r/\/migrations\/[\s\S]*\.py$/) | some }}"
+      - "{{ files | match(regex=r/test_/) | nope }}"
+      - "{{ files | match(regex=r/_test\.py/) | nope }}"
+      - "{{ files | match(regex=r/\/tests\//) | nope }}"
+    run:
+      - action: add-label@v1
+        args:
+          label: "migrations + missing-tests"
+
+  label_python_code:
+    if:
+      - "{{ files | match(regex=r/\.py$/) | some }}"
+    run:
+      - action: add-label@v1
+        args:
+          label: "python"

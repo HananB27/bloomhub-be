@@ -11,6 +11,11 @@ repos:
         args: [--fix]
   - repo: local
     hooks:
+      - id: gitstream-cm-validate
+        name: gitStream .cm validate
+        entry: bash -c 'if [ -d .venv ]; then . .venv/bin/activate; fi; python3 scripts/validate_gitstream_cm.py "$@"'
+        language: system
+        files: '\.cm$'
       - id: pytest
         name: pytest
         entry: bash -c 'if [ -d .venv ]; then . .venv/bin/activate; fi; python3 -m pytest'
