@@ -1,24 +1,55 @@
 # BloomHub Backend (Django)
 
-Django backend with the same tooling as the frontend: tests, formatting, GitStream, and commit convention `[BHB-XX]`.
+Django backend with tests, formatting, and commit convention `[BHB-XX]`.
+
+---
 
 ## Local setup
 
-- Python 3.11+
-- Create a venv and install: `pip install -r requirements.txt`
-- Copy `.env.example` to `.env` and set `DATABASE_URL` (local Postgres or Neon dev).
-- Run migrations: `python manage.py migrate`
-- Start the server: `python manage.py runserver` (or `python manage.py runserver 8001` if port 8000 is in use).
-- Install pre-commit: `pre-commit install` (and `pre-commit install --hook-type commit-msg` for commit message check).
+### Prerequisites
+
+- Python 3.11+ (3.12 recommended)
+
+### Run locally
+
+```bash
+git clone <repo-url>
+cd BloomHub-be
+python -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+cp .env.example .env
+```
+
+Edit `.env`:
+
+- **SQLite (easiest):** leave `DATABASE_URL` unset. The app uses `db.sqlite3` in the project root.
+- **Local Postgres:** set `DATABASE_URL=postgres://user:password@localhost:5432/yourdb`
+
+Then:
+
+```bash
+python manage.py migrate
+python manage.py runserver
+```
+
+Open http://127.0.0.1:8000/
+
+### Pre-commit (optional)
+
+Runs ruff, black, and pytest on every commit; commit is blocked if they fail.
+
+```bash
+pre-commit install
+pre-commit install --hook-type commit-msg
+```
+
+---
 
 ## Scripts
 
-- **Lint:** `ruff check .`
-- **Format:** `black .` / `black --check .`
-- **Tests:** `pytest`
-
-## Docs
-
-- **Migrations on dev:** `docs/MIGRATIONS_DEV.md`
-- **Production deploy:** `docs/DEPLOY_PRODUCTION.md`
-- **Branch protection:** `docs/BRANCH_PROTECTION.md`
+| Command | Description |
+|--------|-------------|
+| `ruff check .` | Lint |
+| `black .` / `black --check .` | Format / check format |
+| `pytest` | Run tests |

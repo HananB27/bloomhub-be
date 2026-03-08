@@ -11,9 +11,14 @@ repos:
         args: [--fix]
   - repo: local
     hooks:
+      - id: pytest
+        name: pytest
+        entry: bash -c 'if [ -d .venv ]; then . .venv/bin/activate; fi; python3 -m pytest'
+        language: system
+        pass_filenames: false
       - id: commit-message-bhb
         name: commit message [BHB-XX]
-        entry: bash -c 'head -1 "$1" | grep -qE "^\[BHB-[0-9]+\] " || { echo "Commit message must match [BHB-XX] description"; exit 1; }'
+        entry: bash -c 'head -1 "$0" | grep -qE "^\[BHB-[0-9]+\] " || { echo "Commit message must match [BHB-XX] description"; exit 1; }'
         language: system
         stages: [commit-msg]
         pass_filenames: true

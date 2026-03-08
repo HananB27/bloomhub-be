@@ -9,8 +9,19 @@ jobs:
     name: Migrate and deploy to production
     runs-on: ubuntu-latest
     environment: production
+    permissions:
+      contents: read
+      deployments: write
     steps:
       - uses: actions/checkout@v4
+
+      - name: Create GitHub deployment record
+        id: deployment
+        uses: chrnorm/deployment-action@v2
+        with:
+          token: ${{ github.token }}
+          environment: production
+          environment-url: ${{ secrets.PROD_ENVIRONMENT_URL }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -30,9 +41,19 @@ jobs:
 
       - name: Deploy to production
         env:
-          PROD_DEPLOY_SECRET: ${{ secrets.PROD_DEPLOY_SECRET }}
+          PROD_DEPLOY_WEBHOOK: ${{ secrets.PROD_DEPLOY_WEBHOOK }}
         run: |
-          echo "Deploy to prod: add your command above (e.g. Railway, Render, Fly). Set PROD_DEPLOY_SECRET or other secrets as needed."
-          if [ -n "$PROD_DEPLOY_SECRET" ]; then
-            echo "PROD_DEPLOY_SECRET is set. Add your deploy command here."
+          if [ -n "$PROD_DEPLOY_WEBHOOK" ]; then
+            echo "Triggering production deploy via webhook..."
+            curl -fsS -X POST "$PROD_DEPLOY_WEBHOOK"
+          else
+            echo "PROD_DEPLOY_WEBHOOK not set. Add it in repo Secrets (or production environment secrets) with your Render production Deploy Hook URL."
           fi
+
+      - name: Update deployment status
+        if: always() && steps.deployment.outputs.deployment_id != ''
+        uses: chrnorm/deployment-status@v2
+        with:
+          token: ${{ github.token }}
+          deployment-id: ${{ steps.deployment.outputs.deployment_id }}
+          state: ${{ job.status }}
