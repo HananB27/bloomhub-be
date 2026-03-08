@@ -3,6 +3,7 @@ Django settings for BloomHub project.
 
 Uses DATABASE_URL (Neon or local Postgres). Set ENVIRONMENT to local, dev, or prod.
 """
+
 import os
 from pathlib import Path
 
@@ -18,6 +19,7 @@ SECRET_KEY = os.environ.get("SECRET_KEY", "django-insecure-dev-change-in-product
 DEBUG = os.environ.get("DEBUG", "true").lower() in ("1", "true", "yes")
 ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
 
+
 def _get_database_url():
     if os.environ.get("DATABASE_URL"):
         return os.environ["DATABASE_URL"]
@@ -27,6 +29,7 @@ def _get_database_url():
         return os.environ.get("PROD_DATABASE_URL", "")
     # local, no DATABASE_URL: use SQLite so you don't need a local Postgres
     return ""
+
 
 DATABASE_URL = _get_database_url()
 
@@ -86,7 +89,9 @@ else:
     }
 
 AUTH_PASSWORD_VALIDATORS = [
-    {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
+    {
+        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"
+    },
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
     {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
