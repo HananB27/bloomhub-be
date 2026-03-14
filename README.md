@@ -35,6 +35,68 @@ python manage.py runserver
 
 Open http://127.0.0.1:8000/
 
+The root URL (`/`) provides API information and available endpoints.
+
+## Authentication API
+
+The backend uses JWT (JSON Web Tokens) for authentication via Django REST Framework.
+
+### Endpoints
+
+- `POST /api/auth/register/` - Register a new user
+- `POST /api/auth/login/` - Login with email/password and get tokens
+- `POST /api/auth/refresh/` - Refresh access token using refresh token
+- `POST /api/auth/logout/` - Logout (blacklist refresh token)
+- `GET /api/auth/profile/` - Get current user profile (requires authentication)
+
+### Authentication
+
+Include the access token in the `Authorization` header:
+```
+Authorization: Bearer <access_token>
+```
+
+### Example Usage
+
+#### Register
+```bash
+curl -X POST http://127.0.0.1:8000/api/auth/register/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "testuser",
+    "email": "test@example.com",
+    "password": "password123",
+    "password_confirm": "password123",
+    "first_name": "Test",
+    "last_name": "User"
+  }'
+```
+
+#### Login
+```bash
+curl -X POST http://127.0.0.1:8000/api/auth/login/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "test@example.com",
+    "password": "password123"
+  }'
+```
+
+Response includes `access`, `refresh` tokens, and `user` data.
+
+#### Refresh Token
+```bash
+curl -X POST http://127.0.0.1:8000/api/auth/refresh/ \
+  -H "Content-Type: application/json" \
+  -d '{"refresh": "<refresh_token>"}'
+```
+
+#### Access Protected Endpoint
+```bash
+curl -H "Authorization: Bearer <access_token>" \
+  http://127.0.0.1:8000/api/auth/profile/
+```
+
 ### Pre-commit (optional)
 
 Runs ruff, black, and pytest on every commit; commit is blocked if they fail.
