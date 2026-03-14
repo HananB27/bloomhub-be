@@ -16,8 +16,26 @@ Including another URLconf
 """
 
 from django.contrib import admin
-from django.urls import path
+from django.http import JsonResponse
+from django.urls import include, path
+
+
+def api_root(request):
+    return JsonResponse(
+        {
+            "message": "BloomHub Backend API",
+            "version": "1.0.0",
+            "documentation": "/api/",
+            "endpoints": {
+                "api": "/api/",
+                "admin": "/admin/",
+            },
+        }
+    )
+
 
 urlpatterns = [
+    path("", api_root, name="root"),
     path("admin/", admin.site.urls),
+    path("api/", include("core.urls")),
 ]
