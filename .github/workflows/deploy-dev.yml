@@ -1,4 +1,5 @@
-# Deploy to DEV on every push to main
+# Deploy to DEV when main changes (push/merge to main).
+# Intentionally does not use GitHub environment: dev so this is never a PR merge requirement.
 name: Deploy Dev
 
 on:
@@ -9,20 +10,8 @@ jobs:
   deploy-dev:
     name: Migrate and deploy to dev
     runs-on: ubuntu-latest
-    environment: dev
-    permissions:
-      contents: read
-      deployments: write
     steps:
       - uses: actions/checkout@v4
-
-      - name: Create GitHub deployment record
-        id: deployment
-        uses: chrnorm/deployment-action@v2
-        with:
-          token: ${{ github.token }}
-          environment: dev
-          environment-url: ${{ secrets.DEV_ENVIRONMENT_URL }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -38,7 +27,14 @@ jobs:
       - name: Run migrations (dev)
         env:
           DATABASE_URL: ${{ secrets.DEV_DATABASE_URL }}
-        run: python manage.py migrate --noinput
+          DEV_PUBLIC_DOMAIN: ${{ secrets.DEV_PUBLIC_DOMAIN }}
+        run: |
+          python manage.py migrate_schemas --shared --noinput
+          if [ -n "$DEV_PUBLIC_DOMAIN" ]; then
+            python manage.py setup_public_tenant --domain "$DEV_PUBLIC_DOMAIN"
+          else
+            python manage.py setup_public_tenant
+          fi
 
       - name: Deploy to dev
         env:
@@ -50,11 +46,3 @@ jobs:
           else
             echo "DEV_DEPLOY_WEBHOOK not set. Add it in repo Secrets (Settings → Secrets → Actions) with your host's deploy webhook URL (e.g. Render Deploy Hook, Railway webhook) to enable automatic dev deploys."
           fi
-
-      - name: Update deployment status
-        if: always() && steps.deployment.outputs.deployment_id != ''
-        uses: chrnorm/deployment-status@v2
-        with:
-          token: ${{ github.token }}
-          deployment-id: ${{ steps.deployment.outputs.deployment_id }}
-          state: ${{ job.status }}
