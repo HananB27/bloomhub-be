@@ -123,6 +123,17 @@ DEFAULT_LEAVE_POLICIES = [
     },
 ]
 
+ASSET_MANAGEMENT_MODULE = "Asset Management"
+DEFAULT_ASSET_PERMISSION_ACTIONS = (
+    "view_own_assets",
+    "process_asset_return",
+    "initiate_asset_return",
+)
+DEFAULT_USER_ASSET_PERMISSION_ACTIONS = (
+    "view_own_assets",
+    "initiate_asset_return",
+)
+
 
 def employee_document_upload_to(instance: "EmployeeDocument", filename: str) -> str:
     """
@@ -189,6 +200,20 @@ class Permission(models.Model):
             )
             self.bit_position = max_bit + 1
         super().save(*args, **kwargs)
+
+
+def ensure_asset_permissions(actions=None):
+    if actions is None:
+        actions = DEFAULT_ASSET_PERMISSION_ACTIONS
+
+    permissions = []
+    for action in actions:
+        permission, _ = Permission.objects.get_or_create(
+            module_name=ASSET_MANAGEMENT_MODULE,
+            feature_action=action,
+        )
+        permissions.append(permission)
+    return permissions
 
 
 class Role(models.Model):
@@ -996,6 +1021,8 @@ def create_user_profile(sender, instance, created, **kwargs):
         profile.full_name = profile.full_name or full_name
         profile.email_address = profile.email_address or email_address
 
+        default_asset_permissions = ensure_asset_permissions()
+
         # If superuser, assign all permissions
         if instance.is_superuser:
             # Get all permissions and build a bitmap with all their bits set
@@ -1010,19 +1037,11 @@ def create_user_profile(sender, instance, created, **kwargs):
         profile.save(update_fields=["full_name", "email_address", "permissions"])
         initialize_leave_balances_for_profile(profile)
 
-        own_assets_permission, _ = Permission.objects.get_or_create(
-            module_name="Asset Management",
-            feature_action="view_own_assets",
-        )
-        if not profile.has_permission(own_assets_permission):
-            profile.add_permission(own_assets_permission)
-
-        return_permission, _ = Permission.objects.get_or_create(
-            module_name="Asset Management",
-            feature_action="initiate_asset_return",
-        )
-        if not profile.has_permission(return_permission):
-            profile.add_permission(return_permission)
+        for permission in default_asset_permissions:
+            if permission.feature_action not in DEFAULT_USER_ASSET_PERMISSION_ACTIONS:
+                continue
+            if not profile.has_permission(permission):
+                profile.add_permission(permission)
 
         if not profile.avatar:
             try:

@@ -18,6 +18,7 @@ from core.models import (
     AssetStatus,
     Assignment,
     Permission,
+    ReplacementLog,
     Role,
 )
 
@@ -185,8 +186,7 @@ class AssetManagementAPITest(APITestCase):
             f"/api/assets/{asset_id}/", {**asset_data, **update_data}, format="json"
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-
-        return asset_id
+        self.assertTrue(Asset.objects.filter(id=asset_id).exists())
 
     def test_asset_status_can_be_changed_via_patch(self):
         """Asset status should be updatable with partial update payloads."""
@@ -278,8 +278,7 @@ class AssetManagementAPITest(APITestCase):
             f"/api/assignments/{assignment_id}/return/", return_data, format="json"
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-
-        return assignment_id
+        self.assertTrue(Assignment.objects.filter(id=assignment_id).exists())
 
     def test_replacement_log_operations(self):
         """Test ReplacementLog operations"""
@@ -314,8 +313,7 @@ class AssetManagementAPITest(APITestCase):
         # Test replacement log filtering
         response = self.client.get(f"/api/replacement-logs/?asset={asset.id}")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-
-        return log_id
+        self.assertTrue(ReplacementLog.objects.filter(id=log_id).exists())
 
     def test_user_profile_operations(self):
         """Test UserProfile operations"""
