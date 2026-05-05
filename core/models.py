@@ -1759,6 +1759,9 @@ class TrainingEntry(models.Model):
     description = models.TextField(
         blank=True, null=True, help_text="Additional notes or description"
     )
+    certificate_link = models.URLField(
+        blank=True, null=True, help_text="HTTPS URL link to the training certificate"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
