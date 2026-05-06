@@ -6508,6 +6508,8 @@ components:
         days:
           type: string
           readOnly: true
+        reason:
+          type: string
         status:
           $ref: '#/components/schemas/Status5c0Enum'
         status_display:
@@ -6526,6 +6528,7 @@ components:
       - id
       - leave_type
       - leave_type_display
+      - reason
       - start_date
       - status_display
       - submitted_date
@@ -6541,11 +6544,15 @@ components:
         end_date:
           type: string
           format: date
+        reason:
+          type: string
+          minLength: 1
         status:
           $ref: '#/components/schemas/Status5c0Enum'
       required:
       - end_date
       - leave_type
+      - reason
       - start_date
     LeaveRequestRejectRequest:
       type: object
@@ -6831,6 +6838,9 @@ components:
         end_date:
           type: string
           format: date
+        reason:
+          type: string
+          minLength: 1
         status:
           $ref: '#/components/schemas/Status5c0Enum'
     PatchedPerformanceReviewActionPointRequest:

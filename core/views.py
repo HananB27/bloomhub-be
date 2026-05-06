@@ -2495,8 +2495,8 @@ class LeaveRequestViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         instance = serializer.save()
-        # Return full details using the list serializer
-        response_serializer = LeaveRequestListSerializer(instance)
+        # Return full details so the client keeps the submitted reason and approval metadata.
+        response_serializer = LeaveRequestDetailSerializer(instance)
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
 
     def perform_create(self, serializer):

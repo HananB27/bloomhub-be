@@ -921,6 +921,7 @@ class LeaveRequestListSerializer(serializers.ModelSerializer):
             "start_date",
             "end_date",
             "days",
+            "reason",
             "status",
             "status_display",
             "submitted_date",
