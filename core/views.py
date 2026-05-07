@@ -21,6 +21,7 @@ from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiParameter, extend_schema, extend_schema_view
 from rest_framework import (
     filters,
+    mixins,
     pagination,
     parsers,
     permissions,
@@ -45,6 +46,7 @@ from .models import (
     Asset,
     AssetStatus,
     Assignment,
+    ChecklistInstance,
     ChecklistTask,
     ChecklistTemplate,
     CPFLevel,
@@ -107,6 +109,8 @@ from .serializers import (
     AssignmentSerializer,
     AvatarUploadSerializer,
     BulkIdsSerializer,
+    ChecklistInstanceCreateSerializer,
+    ChecklistInstanceSerializer,
     ChecklistTaskSerializer,
     ChecklistTemplateSerializer,
     DocumentCreateSerializer,
@@ -2748,13 +2752,13 @@ class ChecklistTemplateViewSet(viewsets.ModelViewSet):
         cloned = ChecklistTemplate.objects.create(
             name=f"{original.name} (Copy)",
             type=original.type,
+            role_responsible=original.role_responsible,
         )
         for task in original.task_templates.all():
             TaskTemplate.objects.create(
                 checklist_template=cloned,
                 title=task.title,
                 order=task.order,
-                role_responsible=task.role_responsible,
             )
         serializer = self.get_serializer(cloned)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -2885,6 +2889,103 @@ class ChecklistTaskViewSet(viewsets.ModelViewSet):
         tasks = self.queryset.filter(checklist_instance__employee=employee_profile)
         serializer = self.get_serializer(tasks, many=True)
         return Response(serializer.data)
+
+
+@extend_schema(tags=["Onboarding / Offboarding"])
+class ChecklistInstanceViewSet(
+    viewsets.GenericViewSet,
+    mixins.CreateModelMixin,
+    mixins.ListModelMixin,
+    mixins.DestroyModelMixin,
+):
+    serializer_class = ChecklistInstanceSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return ChecklistInstance.objects.select_related(
+            "employee__user", "template"
+        ).all()
+
+    def _require_hr_or_manager(self, request):
+        try:
+            profile = UserProfile.objects.select_related("role").get(user=request.user)
+        except UserProfile.DoesNotExist:
+            return None, Response(
+                {"detail": "User profile not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        is_privileged = (
+            request.user.is_staff
+            or request.user.is_superuser
+            or (profile.role and profile.role.name.lower() in {"hr", "manager"})
+        )
+        if not is_privileged:
+            return None, Response(
+                {"detail": "Only HR or managers can manage checklists."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return profile, None
+
+    @extend_schema(
+        summary="Assign a checklist template to an employee",
+        request=ChecklistInstanceCreateSerializer,
+        responses={201: ChecklistInstanceSerializer},
+    )
+    def create(self, request, *args, **kwargs):
+        _, err = self._require_hr_or_manager(request)
+        if err:
+            return err
+
+        serializer = ChecklistInstanceCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        employee_id = serializer.validated_data["employee"]
+        template_id = serializer.validated_data["template"]
+
+        try:
+            employee = UserProfile.objects.get(pk=employee_id)
+        except UserProfile.DoesNotExist:
+            return Response(
+                {"detail": "Employee not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        try:
+            template = ChecklistTemplate.objects.get(pk=template_id)
+        except ChecklistTemplate.DoesNotExist:
+            return Response(
+                {"detail": "Template not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if ChecklistInstance.objects.filter(employee=employee, template=template).exists():
+            return Response(
+                {"detail": "This checklist is already assigned to this employee."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # post_save signal on ChecklistInstance automatically calls create_tasks_from_template()
+        instance = ChecklistInstance.objects.create(employee=employee, template=template)
+        return Response(
+            ChecklistInstanceSerializer(instance).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    @extend_schema(
+        summary="List all checklist instances",
+        responses={200: ChecklistInstanceSerializer(many=True)},
+    )
+    def list(self, request, *args, **kwargs):
+        _, err = self._require_hr_or_manager(request)
+        if err:
+            return err
+        return super().list(request, *args, **kwargs)
+
+    @extend_schema(summary="Remove a checklist instance and all its tasks")
+    def destroy(self, request, *args, **kwargs):
+        _, err = self._require_hr_or_manager(request)
+        if err:
+            return err
+        return super().destroy(request, *args, **kwargs)
 
 
 # ──────────────────────────────────────────
