@@ -1498,7 +1498,7 @@ class AssetManagementAPITest(APITestCase):
         # User should get 403 if they have no permission, or the data might be None
         if outsider_response.status_code == status.HTTP_200_OK:
             outsider_data = outsider_response.json()
-            # If they can see the assignment, the sensitve data should be None/empty
+            # If they can see the assignment, the sensitive data should be None/empty
             self.assertIsNone(outsider_data.get("return_description"))
             # return_checklist might be [] (empty list) or None
             actual_checklist = outsider_data.get("return_checklist")
