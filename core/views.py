@@ -2761,17 +2761,65 @@ class ChecklistTemplateViewSet(viewsets.ModelViewSet):
 
 
 @extend_schema(tags=["Onboarding / Offboarding"])
-class ChecklistTaskViewSet(viewsets.ReadOnlyModelViewSet):
+class ChecklistTaskViewSet(viewsets.ModelViewSet):
     serializer_class = ChecklistTaskSerializer
     permission_classes = [IsAuthenticated]
+    http_method_names = ["get", "patch", "head", "options"]
     queryset = ChecklistTask.objects.select_related(
         "checklist_instance",
+        "checklist_instance__employee__user",
+        "checklist_instance__template",
         "task_template",
         "assigned_to__user",
     ).all()
 
     def list(self, request, *args, **kwargs):
         return self.my_tasks(request)
+
+    @extend_schema(
+        summary="Update task status",
+        description=(
+            "Updates the status of a checklist task. "
+            "Only the assigned user or HR/staff may update. "
+            "Setting status to 'done' automatically records completed_at."
+        ),
+        responses={200: ChecklistTaskSerializer},
+    )
+    def partial_update(self, request, *args, **kwargs):
+        task = self.get_object()
+
+        try:
+            profile = request.user.profile
+        except (AttributeError, UserProfile.DoesNotExist):
+            return Response(
+                {"detail": "User profile not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        is_hr_or_staff = (
+            request.user.is_staff
+            or request.user.is_superuser
+            or (profile.role and profile.role.name.lower() == "hr")
+        )
+        if not (is_hr_or_staff or task.assigned_to == profile):
+            return Response(
+                {"detail": "Only the assigned user or HR/staff can update this task."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        new_status = request.data.get("status")
+        valid_statuses = {s.value for s in ChecklistTask.Status}
+        if new_status not in valid_statuses:
+            return Response(
+                {"detail": f"Invalid status. Must be one of: {', '.join(sorted(valid_statuses))}."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        task.status = new_status
+        task.completed_at = timezone.now() if new_status == ChecklistTask.Status.DONE else None
+        task.save(update_fields=["status", "completed_at"])
+
+        return Response(self.get_serializer(task).data)
 
     @extend_schema(
         summary="Get tasks assigned to the authenticated user",

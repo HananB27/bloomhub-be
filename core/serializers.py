@@ -20,6 +20,7 @@ from core.models import (
     Assignment,
     Certificate,
     ChecklistTask,
+    ChecklistInstance,
     ChecklistTemplate,
     Document,
     DocumentSigner,
@@ -1895,9 +1896,19 @@ class ChecklistTemplateSerializer(serializers.ModelSerializer):
         return instance
 
 
+class ChecklistInstanceSerializer(serializers.ModelSerializer):
+    employee = UserProfileSerializer(read_only=True)
+    template = ChecklistTemplateSerializer(read_only=True)
+
+    class Meta:
+        model = ChecklistInstance
+        fields = ["id", "employee", "template"]
+
+
 class ChecklistTaskSerializer(serializers.ModelSerializer):
     assigned_to = UserProfileSerializer(read_only=True)
     task_template = TaskTemplateSerializer(read_only=True)
+    checklist_instance = ChecklistInstanceSerializer(read_only=True)
 
     class Meta:
         model = ChecklistTask

@@ -1,6 +1,7 @@
 from django.contrib.auth.models import User
 from django.core.management import call_command
 from django.test import TestCase
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
@@ -282,3 +283,84 @@ class ChecklistTaskAPITestCase(APITestCase):
             f"/api/onboarding/tasks/employee/{self.employee_profile.id}/"
         )
         self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
+
+    def _get_task_for_user(self, profile):
+        return self.instance.tasks.get(assigned_to=profile)
+
+    def test_assigned_user_can_update_status(self):
+        task = self._get_task_for_user(self.it_profile)
+        self.client.force_authenticate(user=self.it_user)
+        res = self.client.patch(
+            f"/api/onboarding/tasks/{task.id}/", {"status": "in_progress"}, format="json"
+        )
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data["status"], "in_progress")
+        task.refresh_from_db()
+        self.assertEqual(task.status, "in_progress")
+        self.assertIsNone(task.completed_at)
+
+    def test_done_status_sets_completed_at(self):
+        task = self._get_task_for_user(self.it_profile)
+        self.client.force_authenticate(user=self.it_user)
+        res = self.client.patch(
+            f"/api/onboarding/tasks/{task.id}/", {"status": "done"}, format="json"
+        )
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        task.refresh_from_db()
+        self.assertIsNotNone(task.completed_at)
+
+    def test_moving_away_from_done_clears_completed_at(self):
+        task = self._get_task_for_user(self.it_profile)
+        task.status = "done"
+        task.completed_at = timezone.now()
+        task.save()
+        self.client.force_authenticate(user=self.it_user)
+        res = self.client.patch(
+            f"/api/onboarding/tasks/{task.id}/", {"status": "todo"}, format="json"
+        )
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        task.refresh_from_db()
+        self.assertIsNone(task.completed_at)
+
+    def test_hr_can_update_any_task_status(self):
+        task = self._get_task_for_user(self.it_profile)
+        self.client.force_authenticate(user=self.hr_user)
+        res = self.client.patch(
+            f"/api/onboarding/tasks/{task.id}/", {"status": "done"}, format="json"
+        )
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+
+    def test_unassigned_user_cannot_update_status(self):
+        task = self._get_task_for_user(self.it_profile)
+        self.client.force_authenticate(user=self.manager_user)
+        res = self.client.patch(
+            f"/api/onboarding/tasks/{task.id}/", {"status": "in_progress"}, format="json"
+        )
+        self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_invalid_status_value_rejected(self):
+        task = self._get_task_for_user(self.it_profile)
+        self.client.force_authenticate(user=self.it_user)
+        res = self.client.patch(
+            f"/api/onboarding/tasks/{task.id}/", {"status": "invalid"}, format="json"
+        )
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_put_method_not_allowed(self):
+        task = self._get_task_for_user(self.it_profile)
+        self.client.force_authenticate(user=self.it_user)
+        res = self.client.put(
+            f"/api/onboarding/tasks/{task.id}/", {"status": "done"}, format="json"
+        )
+        self.assertEqual(res.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
+
+    def test_response_includes_nested_checklist_instance(self):
+        task = self._get_task_for_user(self.it_profile)
+        self.client.force_authenticate(user=self.it_user)
+        res = self.client.patch(
+            f"/api/onboarding/tasks/{task.id}/", {"status": "in_progress"}, format="json"
+        )
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertIn("checklist_instance", res.data)
+        self.assertIn("employee", res.data["checklist_instance"])
+        self.assertIn("template", res.data["checklist_instance"])
