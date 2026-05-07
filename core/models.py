@@ -815,11 +815,23 @@ class Asset(models.Model):
     @property
     def current_assignment(self):
         """Get current active assignment if any"""
-        return self.assignments.filter(returned_at__isnull=True).first()
+        active_assignments = getattr(self, "active_assignments", None)
+        if active_assignments is not None:
+            return active_assignments[0] if active_assignments else None
+
+        return (
+            self.assignments.filter(returned_at__isnull=True)
+            .select_related("employee__user")
+            .first()
+        )
 
     @property
     def is_available(self):
         """Check if asset is available for assignment"""
+        has_active_assignment = getattr(self, "has_active_assignment", None)
+        if has_active_assignment is not None:
+            return self.status == AssetStatus.ACTIVE and not has_active_assignment
+
         return self.status == AssetStatus.ACTIVE and not self.current_assignment
 
 

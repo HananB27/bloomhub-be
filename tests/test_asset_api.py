@@ -356,6 +356,34 @@ class AssetManagementAPITest(APITestCase):
         response = self.client.get(f"/api/assets/{asset.id}/")
         self.assertFalse(response.data["is_available"])
 
+    def test_asset_available_filter_uses_availability_rules(self):
+        """Available filter should match active status and active assignments."""
+        available_asset = self._create_asset(prefix="AVAILABLE")
+        assigned_asset = self._create_asset(prefix="ASSIGNED")
+        inactive_asset = self._create_asset(prefix="INACTIVE")
+        inactive_asset.status = AssetStatus.DAMAGED
+        inactive_asset.save(update_fields=["status"])
+
+        Assignment.objects.create(
+            asset=assigned_asset,
+            employee=self.profile,
+            notes="Currently assigned",
+        )
+
+        response = self.client.get("/api/assets/?available=true")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            {item["id"] for item in response.data},
+            {available_asset.id},
+        )
+
+        response = self.client.get("/api/assets/?available=false")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            {item["id"] for item in response.data},
+            {assigned_asset.id, inactive_asset.id},
+        )
+
     def test_assignment_validation(self):
         """Test assignment validation"""
         # Create an asset and assign it

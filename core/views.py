@@ -13,7 +13,7 @@ from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.core.validators import URLValidator
 from django.db import models, transaction
-from django.db.models import Avg, Max, Prefetch
+from django.db.models import Avg, Exists, Max, OuterRef, Prefetch, Q
 from django.http import HttpResponse
 from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
@@ -42,6 +42,7 @@ from .constants import (
 )
 from .models import (
     Asset,
+    AssetStatus,
     Assignment,
     ChecklistTask,
     ChecklistTemplate,
@@ -1700,6 +1701,30 @@ class EmployeeProfileChangeHistoryView(APIView):
 # Asset Management API Views
 
 
+def _active_assignment_queryset():
+    return Assignment.objects.filter(returned_at__isnull=True).select_related(
+        "employee__user"
+    )
+
+
+def _with_asset_availability(assets):
+    active_assignments = _active_assignment_queryset()
+    return assets.annotate(
+        has_active_assignment=Exists(
+            Assignment.objects.filter(
+                asset_id=OuterRef("pk"),
+                returned_at__isnull=True,
+            )
+        )
+    ).prefetch_related(
+        Prefetch(
+            "assignments",
+            queryset=active_assignments,
+            to_attr="active_assignments",
+        )
+    )
+
+
 def _get_assets_for_user(user):
     if has_asset_permission(user, "view_all_assets"):
         return Asset.objects.all()
@@ -1747,11 +1772,17 @@ def _apply_asset_filters(assets, filter_data):
         ).distinct()
 
     available_filter = filter_data.get("available")
+    assets = _with_asset_availability(assets)
     if available_filter is not None:
         if available_filter:
-            assets = [asset for asset in assets if asset.is_available]
+            assets = assets.filter(
+                status=AssetStatus.ACTIVE,
+                has_active_assignment=False,
+            )
         else:
-            assets = [asset for asset in assets if not asset.is_available]
+            assets = assets.filter(
+                Q(has_active_assignment=True) | ~Q(status=AssetStatus.ACTIVE)
+            )
 
     return assets
 
@@ -1971,7 +2002,7 @@ class AssetDetailView(APIView):
     def get_object(self, pk):
         """Get asset by ID"""
         try:
-            return Asset.objects.get(pk=pk)
+            return _with_asset_availability(Asset.objects).get(pk=pk)
         except Asset.DoesNotExist:
             return None
 
