@@ -2932,7 +2932,7 @@ class ChecklistInstanceViewSet(
         responses={201: ChecklistInstanceSerializer},
     )
     def create(self, request, *args, **kwargs):
-        _, err = self._require_hr_or_manager(request)
+        creator_profile, err = self._require_hr_or_manager(request)
         if err:
             return err
 
@@ -2940,6 +2940,7 @@ class ChecklistInstanceViewSet(
         serializer.is_valid(raise_exception=True)
         employee_id = serializer.validated_data["employee"]
         template_id = serializer.validated_data["template"]
+        due_date = serializer.validated_data.get("due_date")
 
         try:
             employee = UserProfile.objects.get(pk=employee_id)
@@ -2963,8 +2964,14 @@ class ChecklistInstanceViewSet(
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # post_save signal on ChecklistInstance automatically calls create_tasks_from_template()
-        instance = ChecklistInstance.objects.create(employee=employee, template=template)
+        # post_save signal calls create_tasks_from_template(); due_date and created_by
+        # must be set before save so the signal can read them.
+        instance = ChecklistInstance.objects.create(
+            employee=employee,
+            template=template,
+            due_date=due_date,
+            created_by=creator_profile,
+        )
         return Response(
             ChecklistInstanceSerializer(instance).data,
             status=status.HTTP_201_CREATED,

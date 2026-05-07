@@ -1852,6 +1852,14 @@ class ChecklistInstance(models.Model):
         choices=ChecklistInstanceStatus.choices,
         default=ChecklistInstanceStatus.IN_PROGRESS,
     )
+    due_date = models.DateField(null=True, blank=True)
+    created_by = models.ForeignKey(
+        UserProfile,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_checklist_instances",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -1877,12 +1885,15 @@ class ChecklistInstance(models.Model):
     def create_tasks_from_template(self):
         """Create checklist tasks from the associated checklist template."""
         assignee = self.get_assignee_for_role(self.template.role_responsible)
+        if assignee is None:
+            assignee = self.created_by
         for task_template in self.template.task_templates.all():
             ChecklistTask.objects.create(
                 checklist_instance=self,
                 task_template=task_template,
                 title=task_template.title,
                 assigned_to=assignee,
+                due_date=self.due_date,
             )
 
     class Meta:
