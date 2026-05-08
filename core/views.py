@@ -2815,12 +2815,16 @@ class ChecklistTaskViewSet(viewsets.ModelViewSet):
         valid_statuses = {s.value for s in ChecklistTask.Status}
         if new_status not in valid_statuses:
             return Response(
-                {"detail": f"Invalid status. Must be one of: {', '.join(sorted(valid_statuses))}."},
+                {
+                    "detail": f"Invalid status. Must be one of: {', '.join(sorted(valid_statuses))}."
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         task.status = new_status
-        task.completed_at = timezone.now() if new_status == ChecklistTask.Status.DONE else None
+        task.completed_at = (
+            timezone.now() if new_status == ChecklistTask.Status.DONE else None
+        )
         task.save(update_fields=["status", "completed_at"])
 
         return Response(self.get_serializer(task).data)
@@ -2871,8 +2875,15 @@ class ChecklistTaskViewSet(viewsets.ModelViewSet):
         can_view = (
             request.user.is_staff
             or request.user.is_superuser
-            or (profile is not None and profile.role and profile.role.name.lower() == "hr")
-            or (profile is not None and employee_profile.managers.filter(pk=profile.pk).exists())
+            or (
+                profile is not None
+                and profile.role
+                and profile.role.name.lower() == "hr"
+            )
+            or (
+                profile is not None
+                and employee_profile.managers.filter(pk=profile.pk).exists()
+            )
         )
 
         if not can_view:
@@ -2957,7 +2968,9 @@ class ChecklistInstanceViewSet(
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        if ChecklistInstance.objects.filter(employee=employee, template=template).exists():
+        if ChecklistInstance.objects.filter(
+            employee=employee, template=template
+        ).exists():
             return Response(
                 {"detail": "This checklist is already assigned to this employee."},
                 status=status.HTTP_400_BAD_REQUEST,
