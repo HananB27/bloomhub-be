@@ -2941,6 +2941,7 @@ class ChecklistInstanceViewSet(
         employee_id = serializer.validated_data["employee"]
         template_id = serializer.validated_data["template"]
         due_date = serializer.validated_data.get("due_date")
+        task_due_dates = serializer.validated_data.get("task_due_dates") or {}
 
         try:
             employee = UserProfile.objects.get(pk=employee_id)
@@ -2972,6 +2973,15 @@ class ChecklistInstanceViewSet(
             due_date=due_date,
             created_by=creator_profile,
         )
+
+        # Override individual task due dates where provided (key = task_template_id).
+        if task_due_dates:
+            for task in instance.tasks.all():
+                key = str(task.task_template_id)
+                if key in task_due_dates:
+                    task.due_date = task_due_dates[key]
+                    task.save(update_fields=["due_date"])
+
         return Response(
             ChecklistInstanceSerializer(instance).data,
             status=status.HTTP_201_CREATED,

@@ -1910,6 +1910,11 @@ class ChecklistInstanceCreateSerializer(serializers.Serializer):
     employee = serializers.IntegerField()
     template = serializers.IntegerField()
     due_date = serializers.DateField(required=False, allow_null=True)
+    task_due_dates = serializers.DictField(
+        child=serializers.DateField(allow_null=True),
+        required=False,
+        allow_null=True,
+    )
 
 
 class ChecklistTaskSerializer(serializers.ModelSerializer):
