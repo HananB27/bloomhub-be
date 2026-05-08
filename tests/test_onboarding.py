@@ -263,7 +263,9 @@ class ChecklistTaskAPITestCase(APITestCase):
         task = self._get_any_task()
         self.client.force_authenticate(user=self.it_user)
         res = self.client.patch(
-            f"/api/onboarding/tasks/{task.id}/", {"status": "in_progress"}, format="json"
+            f"/api/onboarding/tasks/{task.id}/",
+            {"status": "in_progress"},
+            format="json",
         )
         self.assertEqual(res.status_code, status.HTTP_200_OK)
         self.assertEqual(res.data["status"], "in_progress")
@@ -306,7 +308,9 @@ class ChecklistTaskAPITestCase(APITestCase):
         task = self._get_any_task()
         self.client.force_authenticate(user=self.manager_user)
         res = self.client.patch(
-            f"/api/onboarding/tasks/{task.id}/", {"status": "in_progress"}, format="json"
+            f"/api/onboarding/tasks/{task.id}/",
+            {"status": "in_progress"},
+            format="json",
         )
         self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
 
@@ -330,7 +334,9 @@ class ChecklistTaskAPITestCase(APITestCase):
         task = self._get_any_task()
         self.client.force_authenticate(user=self.it_user)
         res = self.client.patch(
-            f"/api/onboarding/tasks/{task.id}/", {"status": "in_progress"}, format="json"
+            f"/api/onboarding/tasks/{task.id}/",
+            {"status": "in_progress"},
+            format="json",
         )
         self.assertEqual(res.status_code, status.HTTP_200_OK)
         self.assertIn("checklist_instance", res.data)
@@ -461,9 +467,7 @@ class ChecklistInstanceAPITestCase(APITestCase):
         self.client.force_authenticate(user=self.hr_user)
         res = self.client.delete(f"/api/onboarding/instances/{instance.id}/")
         self.assertEqual(res.status_code, status.HTTP_204_NO_CONTENT)
-        self.assertFalse(
-            ChecklistInstance.objects.filter(id=instance.id).exists()
-        )
+        self.assertFalse(ChecklistInstance.objects.filter(id=instance.id).exists())
 
     def test_invalid_employee_returns_404(self):
         self.client.force_authenticate(user=self.hr_user)

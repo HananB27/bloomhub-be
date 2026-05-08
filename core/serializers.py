@@ -1886,7 +1886,9 @@ class ChecklistTemplateSerializer(serializers.ModelSerializer):
         task_templates_data = validated_data.pop("task_templates", None)
         instance.name = validated_data.get("name", instance.name)
         instance.type = validated_data.get("type", instance.type)
-        instance.role_responsible = validated_data.get("role_responsible", instance.role_responsible)
+        instance.role_responsible = validated_data.get(
+            "role_responsible", instance.role_responsible
+        )
         instance.save()
 
         if task_templates_data is not None:
