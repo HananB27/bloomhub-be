@@ -2834,10 +2834,8 @@ class ChecklistTaskViewSet(viewsets.ModelViewSet):
         try:
             profile = request.user.profile
         except (AttributeError, UserProfile.DoesNotExist):
-            return Response(
-                {"detail": "Authenticated user profile not found."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            # Superusers/staff without a profile have no assigned tasks
+            return Response([])
 
         tasks = self.queryset.filter(assigned_to=profile)
         serializer = self.get_serializer(tasks, many=True)
@@ -2860,10 +2858,7 @@ class ChecklistTaskViewSet(viewsets.ModelViewSet):
         try:
             profile = request.user.profile
         except (AttributeError, UserProfile.DoesNotExist):
-            return Response(
-                {"detail": "Authenticated user profile not found."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            profile = None
 
         try:
             employee_profile = UserProfile.objects.get(pk=employee_id)
@@ -2876,8 +2871,8 @@ class ChecklistTaskViewSet(viewsets.ModelViewSet):
         can_view = (
             request.user.is_staff
             or request.user.is_superuser
-            or (profile.role and profile.role.name.lower() == "hr")
-            or employee_profile.managers.filter(pk=profile.pk).exists()
+            or (profile is not None and profile.role and profile.role.name.lower() == "hr")
+            or (profile is not None and employee_profile.managers.filter(pk=profile.pk).exists())
         )
 
         if not can_view:
@@ -2910,6 +2905,9 @@ class ChecklistInstanceViewSet(
         try:
             profile = UserProfile.objects.select_related("role").get(user=request.user)
         except UserProfile.DoesNotExist:
+            # Staff/superusers are privileged even without a profile record
+            if request.user.is_staff or request.user.is_superuser:
+                return None, None
             return None, Response(
                 {"detail": "User profile not found."},
                 status=status.HTTP_404_NOT_FOUND,
