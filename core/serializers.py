@@ -2995,12 +2995,13 @@ class TemplateGeneratedDocumentSerializer(serializers.ModelSerializer):
 class TrainingBudgetSerializer(serializers.ModelSerializer):
     """Serializer for training budget."""
 
-    employee_id = serializers.IntegerField(source="employee.id", read_only=True)
+    employee_id = serializers.IntegerField(write_only=False, required=False)
     employee_name = serializers.CharField(
         source="employee.user.get_full_name", read_only=True
     )
     remaining_budget = serializers.ReadOnlyField()
     budget_percentage_used = serializers.ReadOnlyField()
+    threshold_reached = serializers.SerializerMethodField()
 
     class Meta:
         model = TrainingBudget
@@ -3013,18 +3014,72 @@ class TrainingBudgetSerializer(serializers.ModelSerializer):
             "used_budget",
             "remaining_budget",
             "budget_percentage_used",
+            "threshold_reached",
+            "threshold_notified_at",
             "created_at",
             "updated_at",
         ]
         read_only_fields = [
             "id",
-            "employee_id",
             "employee_name",
+            "used_budget",
             "remaining_budget",
             "budget_percentage_used",
+            "threshold_reached",
+            "threshold_notified_at",
             "created_at",
             "updated_at",
         ]
+
+    @extend_schema_field(OpenApiTypes.BOOL)
+    def get_threshold_reached(self, obj) -> bool:
+        from core.constants import TRAINING_BUDGET_WARNING_THRESHOLD
+
+        if not obj.allocated_budget:
+            return False
+        return (
+            obj.used_budget / obj.allocated_budget
+        ) >= TRAINING_BUDGET_WARNING_THRESHOLD
+
+    def validate_employee_id(self, value):
+        from core.models import UserProfile
+
+        if not UserProfile.objects.filter(pk=value).exists():
+            raise serializers.ValidationError("Employee not found.")
+        return value
+
+    def create(self, validated_data):
+        from core.models import UserProfile
+        from core.services.training_budget_service import recalculate_budget
+
+        employee_id = validated_data.pop("employee_id", None)
+        if employee_id is None:
+            raise serializers.ValidationError(
+                {"employee_id": "This field is required."}
+            )
+        validated_data["employee"] = UserProfile.objects.get(pk=employee_id)
+        instance = super().create(validated_data)
+        # Sync used_budget from existing entries and evaluate threshold for the
+        # freshly-allocated budget.
+        refreshed = recalculate_budget(instance.employee, instance.fiscal_year)
+        return refreshed or instance
+
+    def update(self, instance, validated_data):
+        from core.services.training_budget_service import (
+            _maybe_notify_threshold,
+            recalculate_budget,
+        )
+
+        validated_data.pop("employee_id", None)
+        instance = super().update(instance, validated_data)
+        # If the allocation changed, the usage ratio may have crossed (or
+        # un-crossed) the 80% threshold even with no new entries. Re-check.
+        refreshed = recalculate_budget(instance.employee, instance.fiscal_year)
+        if refreshed is None:
+            instance.refresh_from_db()
+            _maybe_notify_threshold(instance)
+            return instance
+        return refreshed
 
 
 class UserTemplateSnippetSerializer(serializers.ModelSerializer):

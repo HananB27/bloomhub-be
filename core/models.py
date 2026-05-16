@@ -2395,6 +2395,11 @@ class TrainingBudget(models.Model):
         validators=[MinValueValidator(Decimal("0.00"))],
         help_text="Budget amount spent on training so far",
     )
+    threshold_notified_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp when the 80% threshold alert was last sent",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -2651,6 +2656,7 @@ class Notification(models.Model):
         REVIEWS = "reviews", "Reviews"
         ONBOARDING = "onboarding", "Onboarding"
         ANNOUNCEMENTS = "announcements", "Announcements"
+        TRAINING = "training", "Training"
         GENERAL = "general", "General"
 
     recipient = models.ForeignKey(
