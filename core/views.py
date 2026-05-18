@@ -5307,6 +5307,33 @@ def _build_budget_warning(employee, fiscal_year):
     }
 
 
+def _build_budget_warning(employee, fiscal_year):
+    """Return a warning dict when usage crosses 80% or exceeds the allocation."""
+    from decimal import Decimal
+
+    from .constants import TRAINING_BUDGET_WARNING_THRESHOLD
+
+    budget = TrainingBudget.objects.filter(
+        employee=employee, fiscal_year=fiscal_year
+    ).first()
+    if budget is None or not budget.allocated_budget:
+        return None
+
+    ratio = (budget.used_budget or Decimal("0.00")) / budget.allocated_budget
+    if ratio < TRAINING_BUDGET_WARNING_THRESHOLD:
+        return None
+
+    exceeded = budget.used_budget > budget.allocated_budget
+    return {
+        "level": "exceeded" if exceeded else "approaching_limit",
+        "fiscal_year": budget.fiscal_year,
+        "allocated_budget": str(budget.allocated_budget),
+        "used_budget": str(budget.used_budget),
+        "remaining_budget": str(budget.remaining_budget),
+        "percent_used": int(round(float(budget.budget_percentage_used))),
+    }
+
+
 @extend_schema(tags=["Training & Development"])
 class TrainingEntryViewSet(viewsets.ModelViewSet):
     """
@@ -5374,6 +5401,7 @@ class TrainingEntryViewSet(viewsets.ModelViewSet):
         # Store instance for use in create method
         self.created_instance = instance
         recalculate_budget(instance.employee, instance.training_date.year)
+        recalculate_budget(instance.employee, instance.training_date.year)
 
     def create(self, request, *args, **kwargs):
         """Override create to return response with status field."""
@@ -5381,6 +5409,14 @@ class TrainingEntryViewSet(viewsets.ModelViewSet):
         # Re-serialize the created instance with DetailSerializer to include status
         if response.status_code == 201 and hasattr(self, "created_instance"):
             detail_serializer = TrainingEntryDetailSerializer(self.created_instance)
+            data = detail_serializer.data
+            warning = _build_budget_warning(
+                self.created_instance.employee,
+                self.created_instance.training_date.year,
+            )
+            if warning is not None:
+                data["budget_warning"] = warning
+            response.data = data
             data = detail_serializer.data
             warning = _build_budget_warning(
                 self.created_instance.employee,
@@ -5425,7 +5461,10 @@ class TrainingEntryViewSet(viewsets.ModelViewSet):
         """Delete entry (employee: own only, HR: any)."""
         employee = instance.employee
         year = instance.training_date.year
+        employee = instance.employee
+        year = instance.training_date.year
         instance.delete()
+        recalculate_budget(employee, year)
         recalculate_budget(employee, year)
 
     @extend_schema(
