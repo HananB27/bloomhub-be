@@ -274,10 +274,82 @@ class ProjectAssignmentSerializer(serializers.ModelSerializer):
             "project_id",
             "project_name",
             "role",
+            "allocation_percentage",
             "start_date",
             "end_date",
             "status",
+            "notes",
+            "created_at",
+            "updated_at",
         ]
+        read_only_fields = ["created_at", "updated_at"]
+
+    def validate_allocation_percentage(self, value):
+        if value is None or not (0 <= int(value) <= 100):
+            raise serializers.ValidationError("Allocation must be between 0 and 100.")
+        return value
+
+    def validate(self, attrs):
+        start = attrs.get("start_date") or getattr(self.instance, "start_date", None)
+        end = attrs.get("end_date") or getattr(self.instance, "end_date", None)
+        if start and end and end < start:
+            raise serializers.ValidationError(
+                {"end_date": "End date cannot be before start date."}
+            )
+        return attrs
+
+
+class ProjectSerializer(serializers.ModelSerializer):
+    owner_id = serializers.PrimaryKeyRelatedField(
+        source="owner",
+        queryset=UserProfile.objects.all(),
+        required=False,
+        allow_null=True,
+    )
+
+    class Meta:
+        model = Project
+        fields = [
+            "id",
+            "name",
+            "description",
+            "client",
+            "app_stack",
+            "project_type",
+            "status",
+            "start_date",
+            "end_date",
+            "owner_id",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["created_at", "updated_at"]
+
+    def validate_name(self, value):
+        if not value or not value.strip():
+            raise serializers.ValidationError("Name is required.")
+        return value
+
+    def validate(self, attrs):
+        start = attrs.get("start_date") or getattr(self.instance, "start_date", None)
+        end = attrs.get("end_date") or getattr(self.instance, "end_date", None)
+        if start and end and end < start:
+            raise serializers.ValidationError(
+                {"end_date": "End date cannot be before start date."}
+            )
+        ptype = attrs.get("project_type") or getattr(
+            self.instance, "project_type", None
+        )
+        client = attrs.get("client")
+        if client is None and self.instance is not None:
+            client = self.instance.client
+        from .enums import ProjectType
+
+        if ptype == ProjectType.CLIENT and not (client or "").strip():
+            raise serializers.ValidationError(
+                {"client": "Client is required for client projects."}
+            )
+        return attrs
 
 
 class TechnologyTagIdsField(serializers.Field):
@@ -671,6 +743,7 @@ class AssetSerializer(serializers.ModelSerializer):
     is_under_warranty = serializers.SerializerMethodField()
     is_available = serializers.SerializerMethodField()
     capabilities = serializers.SerializerMethodField()
+    qr_code_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Asset
@@ -688,6 +761,8 @@ class AssetSerializer(serializers.ModelSerializer):
             "manufacturer",
             "purchase_price",
             "description",
+            "qr_code_payload",
+            "qr_code_url",
             "created_at",
             "updated_at",
             "current_assignment",
@@ -695,7 +770,12 @@ class AssetSerializer(serializers.ModelSerializer):
             "is_available",
             "capabilities",
         ]
-        read_only_fields = ["created_at", "updated_at"]
+        read_only_fields = [
+            "created_at",
+            "updated_at",
+            "qr_code_payload",
+            "qr_code_url",
+        ]
 
     @extend_schema_field(serializers.DictField(allow_null=True))
     def get_current_assignment(self, obj) -> dict[str, Any] | None:
@@ -726,6 +806,17 @@ class AssetSerializer(serializers.ModelSerializer):
         if request is None:
             return {}
         return get_asset_object_capabilities(request.user, obj)
+
+    @extend_schema_field(serializers.CharField(allow_null=True))
+    def get_qr_code_url(self, obj) -> str | None:
+        request = self.context.get("request")
+        if not obj.pk:
+            return None
+
+        path = f"/api/assets/{obj.pk}/qr-code/"
+        if request is None:
+            return path
+        return request.build_absolute_uri(path)
 
 
 class AssignmentSerializer(serializers.ModelSerializer):
