@@ -43,6 +43,7 @@ from .constants import (
     EMPLOYEE_PROFILE_SEARCH_FIELDS,
 )
 from .models import (
+    Application,
     Asset,
     AssetStatus,
     Assignment,
@@ -58,6 +59,8 @@ from .models import (
     DocumentType,
     EmployeeDocument,
     EmployeeProfileChangeHistory,
+    JobListing,
+    JobListingStatus,
     LeaveAdjustment,
     LeaveBalance,
     LeavePolicy,
@@ -106,6 +109,8 @@ from .permissions import (
 )
 from .serializers import (
     APIRootResponseSerializer,
+    ApplicationCreateSerializer,
+    ApplicationSerializer,
     AssetCreateSerializer,
     AssetExportRequestSerializer,
     AssetSerializer,
@@ -139,6 +144,8 @@ from .serializers import (
     EmployeeProfileChangeHistorySerializer,
     EmployeeProfileSerializer,
     GoogleExchangeSerializer,
+    JobListingDetailSerializer,
+    JobListingListSerializer,
     LeaveAdjustmentSerializer,
     LeaveBalanceSerializer,
     LeavePolicySerializer,
@@ -5960,6 +5967,113 @@ class CertificateViewSet(viewsets.ModelViewSet):
 
         signed_url = generate_presigned_url(certificate.file.name, expiry_seconds=600)
         return Response({"signed_url": signed_url}, status=status.HTTP_200_OK)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Internal Mobility — Job Board
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+@extend_schema(tags=["Internal Mobility"])
+class JobListingViewSet(
+    mixins.ListModelMixin,
+    mixins.RetrieveModelMixin,
+    viewsets.GenericViewSet,
+):
+    """
+    Read-only access to the internal job board.
+
+    Only currently *active* listings are exposed: status is ``open`` and the
+    current time is within the ``open_at`` / ``close_at`` window. Supports
+    filtering by ``department`` and free-text ``search`` over title and
+    description.
+
+    Authenticated employees can apply via the ``apply`` action and review their
+    own applications via ``my-applications``.
+    """
+
+    permission_classes = [IsAuthenticated]
+    filter_backends = [
+        DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter,
+    ]
+    filterset_fields = ["department"]
+    search_fields = ["title", "description"]
+    ordering_fields = ["open_at", "close_at", "created_at"]
+    ordering = ["-open_at"]
+
+    def get_queryset(self):
+        now = timezone.now()
+        return (
+            JobListing.objects.filter(
+                status=JobListingStatus.OPEN,
+                open_at__lte=now,
+                close_at__gte=now,
+            )
+            .select_related("department", "created_by__user")
+            .annotate(application_count=models.Count("applications"))
+        )
+
+    def get_serializer_class(self):
+        if self.action == "retrieve":
+            return JobListingDetailSerializer
+        return JobListingListSerializer
+
+    def _get_profile(self) -> UserProfile | None:
+        user = self.request.user
+        return getattr(user, "profile", None) if user.is_authenticated else None
+
+    @extend_schema(
+        summary="Apply to an internal job listing",
+        request=ApplicationCreateSerializer,
+        responses={201: ApplicationSerializer, 400: OpenApiTypes.OBJECT},
+    )
+    @action(detail=True, methods=["post"], url_path="apply")
+    def apply(self, request, pk=None):
+        listing = self.get_object()
+        profile = self._get_profile()
+        if profile is None:
+            return Response(
+                {"detail": "Authenticated employee profile required to apply."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if Application.objects.filter(listing=listing, applicant=profile).exists():
+            return Response(
+                {"detail": "You have already applied to this listing."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        serializer = ApplicationCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        application = Application.objects.create(
+            listing=listing,
+            applicant=profile,
+            cover_note=serializer.validated_data.get("cover_note", ""),
+        )
+        return Response(
+            ApplicationSerializer(application).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    @extend_schema(
+        summary="List the current user's applications",
+        responses={200: ApplicationSerializer(many=True)},
+    )
+    @action(detail=False, methods=["get"], url_path="my-applications")
+    def my_applications(self, request):
+        profile = self._get_profile()
+        if profile is None:
+            return Response([], status=status.HTTP_200_OK)
+        qs = (
+            Application.objects.filter(applicant=profile)
+            .select_related("listing", "applicant__user")
+            .order_by("-applied_at")
+        )
+        page = self.paginate_queryset(qs)
+        if page is not None:
+            serializer = ApplicationSerializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        return Response(ApplicationSerializer(qs, many=True).data)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
