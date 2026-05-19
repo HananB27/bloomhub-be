@@ -25,6 +25,7 @@ from core.models import (
     ChecklistTask,
     ChecklistTemplate,
     ConferenceCourseRegistration,
+    Department,
     Document,
     DocumentSignatureAuditLog,
     DocumentSigner,
@@ -2966,6 +2967,45 @@ class ApplicationCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Application
         fields = ["cover_note"]
+
+
+class JobListingWriteSerializer(serializers.ModelSerializer):
+    """Write serialiser used by HR/admin to create or update a listing."""
+
+    department_id = serializers.PrimaryKeyRelatedField(
+        source="department",
+        queryset=Department.objects.all(),
+        allow_null=True,
+        required=False,
+    )
+
+    class Meta:
+        model = JobListing
+        fields = [
+            "title",
+            "description",
+            "department_id",
+            "open_at",
+            "close_at",
+            "status",
+        ]
+
+    def validate(self, attrs):
+        open_at = attrs.get("open_at") or getattr(self.instance, "open_at", None)
+        close_at = attrs.get("close_at") or getattr(self.instance, "close_at", None)
+        if open_at and close_at and close_at <= open_at:
+            raise serializers.ValidationError(
+                {"close_at": "Close date must be after open date."}
+            )
+        return attrs
+
+
+class ApplicationStatusUpdateSerializer(serializers.ModelSerializer):
+    """Write serialiser for HR/admin to advance an application status."""
+
+    class Meta:
+        model = Application
+        fields = ["status"]
 
 
 # ──────────────────────────────────────────────────────────────────────────────

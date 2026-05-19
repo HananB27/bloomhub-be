@@ -111,6 +111,7 @@ from .serializers import (
     APIRootResponseSerializer,
     ApplicationCreateSerializer,
     ApplicationSerializer,
+    ApplicationStatusUpdateSerializer,
     AssetCreateSerializer,
     AssetExportRequestSerializer,
     AssetSerializer,
@@ -146,6 +147,7 @@ from .serializers import (
     GoogleExchangeSerializer,
     JobListingDetailSerializer,
     JobListingListSerializer,
+    JobListingWriteSerializer,
     LeaveAdjustmentSerializer,
     LeaveBalanceSerializer,
     LeavePolicySerializer,
@@ -5978,18 +5980,19 @@ class CertificateViewSet(viewsets.ModelViewSet):
 class JobListingViewSet(
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
+    mixins.CreateModelMixin,
+    mixins.UpdateModelMixin,
     viewsets.GenericViewSet,
 ):
     """
-    Read-only access to the internal job board.
+    Internal job board.
 
-    Only currently *active* listings are exposed: status is ``open`` and the
-    current time is within the ``open_at`` / ``close_at`` window. Supports
-    filtering by ``department`` and free-text ``search`` over title and
-    description.
+    Employees see only *active* listings (status ``open`` within the
+    ``open_at`` / ``close_at`` window) and can apply via the ``apply`` action.
 
-    Authenticated employees can apply via the ``apply`` action and review their
-    own applications via ``my-applications``.
+    HR / admin users have full access: they can list every listing regardless
+    of status, create new listings, update existing ones, and review the
+    applicant roster via the ``applications`` action.
     """
 
     permission_classes = [IsAuthenticated]
@@ -5998,27 +6001,43 @@ class JobListingViewSet(
         filters.SearchFilter,
         filters.OrderingFilter,
     ]
-    filterset_fields = ["department"]
+    filterset_fields = ["department", "status"]
     search_fields = ["title", "description"]
     ordering_fields = ["open_at", "close_at", "created_at"]
     ordering = ["-open_at"]
 
     def get_queryset(self):
+        base = JobListing.objects.select_related(
+            "department", "created_by__user"
+        ).annotate(application_count=models.Count("applications"))
+        user = self.request.user
+        if user.is_authenticated and is_hr_or_admin(user):
+            return base
         now = timezone.now()
-        return (
-            JobListing.objects.filter(
-                status=JobListingStatus.OPEN,
-                open_at__lte=now,
-                close_at__gte=now,
-            )
-            .select_related("department", "created_by__user")
-            .annotate(application_count=models.Count("applications"))
+        return base.filter(
+            status=JobListingStatus.OPEN,
+            open_at__lte=now,
+            close_at__gte=now,
         )
 
     def get_serializer_class(self):
+        if self.action in ("create", "update", "partial_update"):
+            return JobListingWriteSerializer
         if self.action == "retrieve":
             return JobListingDetailSerializer
         return JobListingListSerializer
+
+    def _require_hr(self):
+        if not is_hr_or_admin(self.request.user):
+            raise PermissionDenied("Only HR or admin users may modify job listings.")
+
+    def perform_create(self, serializer):
+        self._require_hr()
+        serializer.save(created_by=self._get_profile())
+
+    def perform_update(self, serializer):
+        self._require_hr()
+        serializer.save()
 
     def _get_profile(self) -> UserProfile | None:
         user = self.request.user
@@ -6074,6 +6093,86 @@ class JobListingViewSet(
             serializer = ApplicationSerializer(page, many=True)
             return self.get_paginated_response(serializer.data)
         return Response(ApplicationSerializer(qs, many=True).data)
+
+    @extend_schema(
+        summary="List applications for a listing (HR/admin only)",
+        responses={200: ApplicationSerializer(many=True)},
+    )
+    @action(detail=True, methods=["get"], url_path="applications")
+    def applications(self, request, pk=None):
+        if not is_hr_or_admin(request.user):
+            raise PermissionDenied("Only HR or admin users may view all applicants.")
+        listing = self.get_object()
+        qs = (
+            Application.objects.filter(listing=listing)
+            .select_related("applicant__user", "listing")
+            .order_by("-applied_at")
+        )
+        page = self.paginate_queryset(qs)
+        if page is not None:
+            serializer = ApplicationSerializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        return Response(ApplicationSerializer(qs, many=True).data)
+
+
+@extend_schema(tags=["Internal Mobility"])
+class JobApplicationViewSet(
+    mixins.RetrieveModelMixin,
+    mixins.UpdateModelMixin,
+    viewsets.GenericViewSet,
+):
+    """HR/admin endpoints to advance an application's status."""
+
+    permission_classes = [IsAuthenticated]
+    queryset = Application.objects.select_related("listing", "applicant__user").all()
+
+    def get_serializer_class(self):
+        if self.action in ("update", "partial_update"):
+            return ApplicationStatusUpdateSerializer
+        return ApplicationSerializer
+
+    def _require_hr_or_owner(self, instance=None):
+        user = self.request.user
+        if is_hr_or_admin(user):
+            return
+        # Allow applicants to retrieve their own application; everything else
+        # requires HR/admin.
+        if instance is not None and self.action == "retrieve":
+            profile = getattr(user, "profile", None)
+            if profile is not None and instance.applicant_id == profile.id:
+                return
+        raise PermissionDenied(
+            "Only HR/admin or the applicant may access this application."
+        )
+
+    def _require_hr(self):
+        if not is_hr_or_admin(self.request.user):
+            raise PermissionDenied("Only HR or admin users may modify applications.")
+
+    def retrieve(self, request, *args, **kwargs):
+        instance = self.get_object()
+        self._require_hr_or_owner(instance)
+        return Response(ApplicationSerializer(instance).data)
+
+    def perform_update(self, serializer):
+        self._require_hr()
+        serializer.save()
+
+    def update(self, request, *args, **kwargs):
+        self._require_hr()
+        response = super().update(request, *args, **kwargs)
+        instance = self.get_object()
+        return Response(
+            ApplicationSerializer(instance).data, status=response.status_code
+        )
+
+    def partial_update(self, request, *args, **kwargs):
+        self._require_hr()
+        response = super().partial_update(request, *args, **kwargs)
+        instance = self.get_object()
+        return Response(
+            ApplicationSerializer(instance).data, status=response.status_code
+        )
 
 
 # ──────────────────────────────────────────────────────────────────────────────
