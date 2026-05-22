@@ -19,6 +19,7 @@ from .views import (
     ChecklistTaskViewSet,
     ChecklistTemplateViewSet,
     ConferenceCourseRegistrationViewSet,
+    CPFLevelChangeViewSet,
     CPFLevelListView,
     DepartmentListView,
     DocumentCategoryDefaultsView,
@@ -117,6 +118,9 @@ router.register(r"job-listings", JobListingViewSet, basename="job-listing")
 router.register(r"job-applications", JobApplicationViewSet, basename="job-application")
 router.register(
     r"promotion-history", PromotionHistoryViewSet, basename="promotion-history"
+)
+router.register(
+    r"cpf-level-changes", CPFLevelChangeViewSet, basename="cpf-level-change"
 )
 
 urlpatterns = [
