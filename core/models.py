@@ -3130,6 +3130,8 @@ class Suggestion(models.Model):
 
     def __str__(self):
         return f"Suggestion({self.category or 'general'}, {self.status})"
+
+
 class CPFLevelChange(models.Model):
     """A single CPF (Career Progression Framework) level change for an employee.
 
