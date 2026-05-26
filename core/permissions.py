@@ -652,3 +652,76 @@ class IsCPFLevelChangeEditor(permissions.BasePermission):
             profile = _get_user_profile(user)
             return profile is not None and obj.employee_id == profile.id
         return False
+
+
+# ──────────────────────────────────────────
+# Leave Analytics permissions
+# ──────────────────────────────────────────
+
+LEAVE_ANALYTICS_MODULE = "Vacations"
+LEAVE_ANALYTICS_VIEW_ACTIONS = [
+    "view_dept_trends",
+    "view_org_calendar",
+    "export_leave_reports",
+]
+LEAVE_ANALYTICS_REFRESH_ACTIONS = [
+    "configure_leave_types",
+    "adjust_balances",
+    "override_requests",
+]
+LEAVE_ANALYTICS_OWN_ACTIONS = [
+    "view_own_history",
+    "view_own_balance",
+]
+
+
+def has_leave_analytics_view_permission(user) -> bool:
+    """True when the user can read team/org-wide leave analytics."""
+    return _has_permission(
+        user, LEAVE_ANALYTICS_MODULE, LEAVE_ANALYTICS_VIEW_ACTIONS
+    )
+
+
+def has_leave_analytics_refresh_permission(user) -> bool:
+    """True when the user can trigger an analytics materialization run."""
+    return _has_permission(
+        user, LEAVE_ANALYTICS_MODULE, LEAVE_ANALYTICS_REFRESH_ACTIONS
+    )
+
+
+def has_own_leave_history_permission(user) -> bool:
+    """True when the user can at least see their own leave history."""
+    return _has_permission(
+        user, LEAVE_ANALYTICS_MODULE, LEAVE_ANALYTICS_OWN_ACTIONS
+    )
+
+
+class IsLeaveAnalyticsViewer(permissions.BasePermission):
+    """
+    Gate read access to the LeaveAnalytics endpoints.
+
+    Anyone with at least one of the `LEAVE_ANALYTICS_OWN_ACTIONS` permissions
+    passes — the viewset's `get_queryset` further scopes rows to the caller's
+    own data when the user lacks the team/org view permissions.
+    """
+
+    def has_permission(self, request, view):
+        user = request.user
+        if not user or not user.is_authenticated:
+            return False
+        if request.method not in permissions.SAFE_METHODS:
+            return has_leave_analytics_refresh_permission(user)
+        return (
+            has_leave_analytics_view_permission(user)
+            or has_own_leave_history_permission(user)
+        )
+
+
+class CanRefreshLeaveAnalytics(permissions.BasePermission):
+    """Stricter gate for the `refresh` POST action."""
+
+    def has_permission(self, request, view):
+        user = request.user
+        if not user or not user.is_authenticated:
+            return False
+        return has_leave_analytics_refresh_permission(user)
