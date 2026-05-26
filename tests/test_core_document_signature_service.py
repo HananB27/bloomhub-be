@@ -11,14 +11,21 @@ from core.services import document_signature_service as sig
 
 
 def test_signature_helpers_and_status_recompute():
-    request_context = SimpleNamespace(META={"HTTP_X_FORWARDED_FOR": "1.2.3.4, 5.6.7.8", "HTTP_USER_AGENT": "UA"})
-    assert sig._request_meta(request_context) == {"ip_address": "1.2.3.4", "user_agent": "UA"}
+    request_context = SimpleNamespace(
+        META={"HTTP_X_FORWARDED_FOR": "1.2.3.4, 5.6.7.8", "HTTP_USER_AGENT": "UA"}
+    )
+    assert sig._request_meta(request_context) == {
+        "ip_address": "1.2.3.4",
+        "user_agent": "UA",
+    }
     assert sig._actor_profile(SimpleNamespace(user=SimpleNamespace())) is not None
     assert sig._actor_profile(None) is None
 
     document = SimpleNamespace(pk=1, file_key="f", current_version="1.0")
     signer = SimpleNamespace(pk=2)
-    assert sig._signature_hash(document, signer, {"value": "x"}, timezone.now())  # deterministic hash
+    assert sig._signature_hash(
+        document, signer, {"value": "x"}, timezone.now()
+    )  # deterministic hash
 
     class FakeSigner:
         def __init__(self, status, signed_at=None):
@@ -44,7 +51,12 @@ def test_signature_helpers_and_status_recompute():
     assert doc.signature_status == DocumentSignatureStatus.REJECTED
 
     now = timezone.now()
-    doc = FakeDoc([FakeSigner(DocumentSignerStatus.SIGNED, now), FakeSigner(DocumentSignerStatus.SIGNED, now)])
+    doc = FakeDoc(
+        [
+            FakeSigner(DocumentSignerStatus.SIGNED, now),
+            FakeSigner(DocumentSignerStatus.SIGNED, now),
+        ]
+    )
     sig.recompute_document_signature_status(doc)
     assert doc.signature_status == DocumentSignatureStatus.SIGNED
 
@@ -55,7 +67,9 @@ def test_signature_helpers_and_status_recompute():
 
 @pytest.mark.django_db
 def test_request_sign_sign_reject_reset_and_remind(monkeypatch):
-    owner = User.objects.create_user(username="owner", email="owner@example.com", password="x")
+    owner = User.objects.create_user(
+        username="owner", email="owner@example.com", password="x"
+    )
     actor = owner.profile
     document = Document.objects.create(
         name="Contract",
@@ -129,4 +143,6 @@ def test_request_sign_sign_reject_reset_and_remind(monkeypatch):
     document.archived = True
     document.save(update_fields=["archived"])
     with pytest.raises(serializers.ValidationError):
-        sig.request_document_signatures(document, [{"name": "x", "email": "x@example.com"}], actor)
+        sig.request_document_signatures(
+            document, [{"name": "x", "email": "x@example.com"}], actor
+        )

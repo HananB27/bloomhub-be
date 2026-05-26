@@ -1,10 +1,8 @@
 import io
-from pathlib import Path
 
 import pytest
 from django.contrib.auth.models import User
 from django.core.management import call_command
-from django.core.management.base import CommandError
 
 from core.models import Permission, Role
 
@@ -21,11 +19,23 @@ def test_backfill_asset_qr_codes_dry_run(monkeypatch):
     asset2.qr_code_payload = "payload-2"
     asset2.qr_code_image = type("Img", (), {"name": "image-2.png"})()
 
-    monkeypatch.setattr(cmd_mod.Asset.objects, "order_by", lambda *a, **k: [asset, asset2])
-    monkeypatch.setattr(cmd_mod, "build_asset_qr_payload", lambda asset: f"payload-{asset.pk}")
-    monkeypatch.setattr(cmd_mod, "build_asset_qr_image_path", lambda asset: f"image-{asset.pk}.png")
+    monkeypatch.setattr(
+        cmd_mod.Asset.objects, "order_by", lambda *a, **k: [asset, asset2]
+    )
+    monkeypatch.setattr(
+        cmd_mod, "build_asset_qr_payload", lambda asset: f"payload-{asset.pk}"
+    )
+    monkeypatch.setattr(
+        cmd_mod, "build_asset_qr_image_path", lambda asset: f"image-{asset.pk}.png"
+    )
     called = []
-    monkeypatch.setattr(cmd_mod, "ensure_asset_qr_code", lambda asset, regenerate_image=False: called.append((asset.pk, regenerate_image)))
+    monkeypatch.setattr(
+        cmd_mod,
+        "ensure_asset_qr_code",
+        lambda asset, regenerate_image=False: called.append(
+            (asset.pk, regenerate_image)
+        ),
+    )
 
     out = io.StringIO()
     call_command("backfill_asset_qr_codes", dry_run=True, stdout=out)
@@ -73,11 +83,18 @@ def test_materialize_review_reminders_command(monkeypatch):
     monkeypatch.setattr(
         cmd_mod,
         "materialize_performance_review_reminders",
-        lambda actor=None: {"reviews_processed": 3, "created_count": 2, "sent_count": 1},
+        lambda actor=None: {
+            "reviews_processed": 3,
+            "created_count": 2,
+            "sent_count": 1,
+        },
     )
     out = io.StringIO()
     call_command("materialize_review_reminders", stdout=out)
-    assert "Processed 3 reviews, created 2 reminders, dispatched 1 reminders." in out.getvalue()
+    assert (
+        "Processed 3 reviews, created 2 reminders, dispatched 1 reminders."
+        in out.getvalue()
+    )
 
 
 def test_setup_public_tenant_noop(monkeypatch):

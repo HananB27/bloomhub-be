@@ -7,10 +7,10 @@ from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
-from PIL import ImageDraw, ImageFont
 from django.contrib.auth.models import User
 from django.test import override_settings
 from django.utils import timezone
+from PIL import ImageDraw, ImageFont
 
 from core.avatar_utils import generate_initials_avatar_png, get_initials
 from core.models import Permission, Role, TrainingBudget, TrainingEntry
@@ -24,9 +24,10 @@ from core.services.training_budget_service import (
 
 
 def test_entrypoint_and_tenant_modules_import_cleanly():
+    import importlib
+
     import config.asgi as config_asgi
     import config.wsgi as config_wsgi
-    import importlib
 
     tenants_apps = importlib.import_module("tenants.apps")
 
@@ -53,7 +54,11 @@ def test_entrypoint_and_tenant_modules_import_cleanly():
     assert config_wsgi.application is not None
     assert tenants_apps.TenantsConfig.name == "tenants"
     assert tenants_apps.TenantsConfig.verbose_name == "Tenants"
-    assert tenants_admin.ClientAdmin.list_display == ("name", "schema_name", "created_on")
+    assert tenants_admin.ClientAdmin.list_display == (
+        "name",
+        "schema_name",
+        "created_on",
+    )
     assert tenants_admin.DomainAdmin.list_display == ("domain", "tenant", "is_primary")
     assert tenants_models.Client.auto_create_schema is True
     assert tenants_models.Client.auto_drop_schema is False
@@ -177,12 +182,20 @@ def test_avatar_utils_branches(monkeypatch):
     assert get_initials("", "") == "U"
 
     default_font = ImageFont.load_default()
-    monkeypatch.setattr(ImageFont, "truetype", lambda *args, **kwargs: (_ for _ in ()).throw(OSError("no font")))
+    monkeypatch.setattr(
+        ImageFont,
+        "truetype",
+        lambda *args, **kwargs: (_ for _ in ()).throw(OSError("no font")),
+    )
     monkeypatch.setattr(ImageFont, "load_default", lambda: default_font)
     avatar = generate_initials_avatar_png("", size=64, seed="seed")
     assert avatar == b""
 
-    monkeypatch.setattr(ImageFont, "truetype", lambda *args, **kwargs: (_ for _ in ()).throw(OSError("no font")))
+    monkeypatch.setattr(
+        ImageFont,
+        "truetype",
+        lambda *args, **kwargs: (_ for _ in ()).throw(OSError("no font")),
+    )
     monkeypatch.setattr(ImageFont, "load_default", lambda: default_font)
     avatar = generate_initials_avatar_png("AB", size=64, seed="seed")
     assert avatar.startswith(b"\x89PNG")
@@ -205,13 +218,18 @@ def test_avatar_utils_resize_branch(monkeypatch):
 
 @pytest.mark.django_db
 def test_training_budget_service_edge_cases(monkeypatch):
-    emp_user = User.objects.create_user(username="emp", email="emp@example.com", password="x")
+    emp_user = User.objects.create_user(
+        username="emp", email="emp@example.com", password="x"
+    )
     emp = emp_user.profile
     current_year = timezone.localdate().year
 
     budget = get_or_create_budget(emp, 2027, allocated_default=Decimal("123.45"))
     assert budget.allocated_budget == Decimal("123.45")
-    assert get_or_create_budget(emp, 2027, allocated_default=Decimal("999.99")).pk == budget.pk
+    assert (
+        get_or_create_budget(emp, 2027, allocated_default=Decimal("999.99")).pk
+        == budget.pk
+    )
 
     assert recalculate_budget(emp, 2028) is None
     assert get_remaining_for_year(emp, 2028) is None
@@ -227,7 +245,9 @@ def test_training_budget_service_edge_cases(monkeypatch):
     budget.allocated_budget = Decimal("100.00")
     budget.used_budget = Decimal("50.00")
     budget.threshold_notified_at = timezone.now()
-    budget.save(update_fields=["allocated_budget", "used_budget", "threshold_notified_at"])
+    budget.save(
+        update_fields=["allocated_budget", "used_budget", "threshold_notified_at"]
+    )
     _maybe_notify_threshold(budget)
     budget.refresh_from_db()
     assert budget.threshold_notified_at is None
@@ -240,7 +260,9 @@ def test_training_budget_service_edge_cases(monkeypatch):
     )
     hr_role = Role.objects.create(name="HR")
     hr_role.permissions.add(perm)
-    hr_user = User.objects.create_user(username="hr", email="hr@example.com", password="x")
+    hr_user = User.objects.create_user(
+        username="hr", email="hr@example.com", password="x"
+    )
     hr_profile = hr_user.profile
     hr_profile.role = hr_role
     hr_profile.save(update_fields=["role"])
@@ -251,12 +273,12 @@ def test_training_budget_service_edge_cases(monkeypatch):
         "core.services.training_budget_service.create_notification",
         lambda **kwargs: notifications.append(kwargs) or True,
     )
-    alert_budget = TrainingBudget.objects.create(
-        employee=emp,
-        fiscal_year=current_year,
-        allocated_budget=Decimal("100.00"),
-        used_budget=Decimal("0.00"),
-    )
+    # alert_budget = TrainingBudget.objects.create(
+    #     employee=emp,
+    #     fiscal_year=current_year,
+    #     allocated_budget=Decimal("100.00"),
+    #     used_budget=Decimal("0.00"),
+    # )
     TrainingEntry.objects.create(
         employee=emp,
         course_title="Course",

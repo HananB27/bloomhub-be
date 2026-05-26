@@ -2,13 +2,21 @@ from types import SimpleNamespace
 
 import pytest
 from django.contrib.auth.models import User
-from rest_framework import permissions as drf_permissions
 
 from core.enums import ReviewNoteVisibility
-from core.models import Asset, Assignment, Permission, Role, UserProfile
+from core.models import Asset, Assignment, Permission
 from core.permissions import (
     ASSET_PERMISSION_ALIASES,
     ASSET_PERMISSION_KEYS,
+    IsCPFLevelChangeEditor,
+    IsEmployeeOrHR,
+    IsHRAdminForAdjustment,
+    IsHRAdminOrReadOnlyOwnProfile,
+    IsManagerForApproval,
+    IsReviewCreator,
+    IsReviewEditor,
+    IsReviewViewer,
+    IsTrainingBudgetEditor,
     _asset_permission_names,
     _get_user_profile,
     _has_permission,
@@ -21,8 +29,8 @@ from core.permissions import (
     can_view_asset,
     can_view_asset_maintenance_logs,
     can_view_assignment,
-    can_view_review,
     can_view_return_checklist,
+    can_view_review,
     can_view_training_budget,
     get_asset_capabilities,
     get_asset_object_capabilities,
@@ -30,27 +38,22 @@ from core.permissions import (
     get_asset_scope,
     has_asset_permission,
     has_review_permission,
-    IsCPFLevelChangeEditor,
-    IsEmployeeOrHR,
-    IsHRAdminForAdjustment,
-    IsHRAdminOrReadOnlyOwnProfile,
-    IsManagerForApproval,
-    IsReviewCreator,
-    IsReviewEditor,
-    IsReviewViewer,
-    IsTrainingBudgetEditor,
 )
 
 
 def _create_user(username: str, email: str | None = None):
-    user = User.objects.create_user(username=username, email=email or f"{username}@example.com", password="x")
+    user = User.objects.create_user(
+        username=username, email=email or f"{username}@example.com", password="x"
+    )
     return user, user.profile
 
 
 @pytest.mark.django_db
 def test_asset_permission_helpers_and_object_capabilities():
     perms = {
-        key: Permission.objects.get_or_create(module_name="Asset Management", feature_action=key)[0]
+        key: Permission.objects.get_or_create(
+            module_name="Asset Management", feature_action=key
+        )[0]
         for key in ASSET_PERMISSION_KEYS
     }
     manager_user, manager_profile = _create_user("manager")
@@ -72,7 +75,9 @@ def test_asset_permission_helpers_and_object_capabilities():
         purchase_date="2026-01-01",
         status="active",
     )
-    assignment = Assignment.objects.create(asset=asset, employee=employee_profile, assigned_by=manager_profile)
+    assignment = Assignment.objects.create(
+        asset=asset, employee=employee_profile, assigned_by=manager_profile
+    )
     free_asset = Asset.objects.create(
         asset_id="LAP-2",
         name="Laptop 2",
@@ -81,12 +86,17 @@ def test_asset_permission_helpers_and_object_capabilities():
         status="active",
     )
 
-    assert _asset_permission_names("view_own_assets") == ASSET_PERMISSION_ALIASES["view_own_assets"]
+    assert (
+        _asset_permission_names("view_own_assets")
+        == ASSET_PERMISSION_ALIASES["view_own_assets"]
+    )
     assert _asset_permission_names("custom") == ["custom"]
     assert _get_user_profile(manager_user) == manager_profile
     assert _get_user_profile(SimpleNamespace(profile=None)) is None
 
-    assert _has_permission(manager_user, "Asset Management", ["view_all_assets"]) is True
+    assert (
+        _has_permission(manager_user, "Asset Management", ["view_all_assets"]) is True
+    )
     assert has_asset_permission(manager_user, "view_all_assets") is True
     held = get_asset_permissions(manager_user)
     assert "view_all_assets" in held
@@ -113,10 +123,17 @@ def test_review_and_hr_permission_helpers(monkeypatch):
         lambda user, module, actions: (
             module == "Reviews" and actions == ["view_team_reviews"]
         )
-        or (module == "Employee Profiles" and actions == ["view_all_profiles", "add_remove_employees"]),
+        or (
+            module == "Employee Profiles"
+            and actions == ["view_all_profiles", "add_remove_employees"]
+        ),
     )
 
-    review = SimpleNamespace(employee=employee_profile, employee_id=employee_profile.id, reviewer_id=manager_profile.id)
+    review = SimpleNamespace(
+        employee=employee_profile,
+        employee_id=employee_profile.id,
+        reviewer_id=manager_profile.id,
+    )
     note = SimpleNamespace(review=review, visibility=ReviewNoteVisibility.PRIVATE)
 
     assert has_review_permission(manager_user, "view_team_reviews") is True
@@ -154,7 +171,10 @@ def test_budget_and_cpf_permissions(monkeypatch):
         lambda user, module, actions: (
             module == "Training" and actions == ["configure_budget"]
         )
-        or (module == "Employee Profiles" and actions == ["view_all_profiles", "add_remove_employees"]),
+        or (
+            module == "Employee Profiles"
+            and actions == ["view_all_profiles", "add_remove_employees"]
+        ),
     )
 
     budget = SimpleNamespace(employee_id=profile.id, employee=profile)
@@ -166,12 +186,24 @@ def test_budget_and_cpf_permissions(monkeypatch):
     assert IsTrainingBudgetEditor().has_object_permission(request, None, budget) is True
     assert IsCPFLevelChangeEditor().has_permission(request, None) is True
 
-    budget_other = SimpleNamespace(employee_id=manager_profile.id, employee=manager_profile)
+    budget_other = SimpleNamespace(
+        employee_id=manager_profile.id, employee=manager_profile
+    )
     assert can_view_training_budget(user, budget_other) is False
 
     safe_request = SimpleNamespace(user=user, method="GET")
     assert IsHRAdminOrReadOnlyOwnProfile().has_permission(safe_request, None) is True
     own_obj = SimpleNamespace(user=user)
     other_obj = SimpleNamespace(user=manager_user)
-    assert IsHRAdminOrReadOnlyOwnProfile().has_object_permission(safe_request, None, own_obj) is True
-    assert IsHRAdminOrReadOnlyOwnProfile().has_object_permission(safe_request, None, other_obj) is False
+    assert (
+        IsHRAdminOrReadOnlyOwnProfile().has_object_permission(
+            safe_request, None, own_obj
+        )
+        is True
+    )
+    assert (
+        IsHRAdminOrReadOnlyOwnProfile().has_object_permission(
+            safe_request, None, other_obj
+        )
+        is False
+    )

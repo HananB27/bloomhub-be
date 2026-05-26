@@ -12,9 +12,9 @@ from core.enums import DocumentSignatureStatus, TrackedField
 from core.models import (
     Document,
     EmployeeProfileChangeHistory,
-    Role,
     Project,
     ProjectAssignment,
+    Role,
     UserProfile,
 )
 from core.services import document_query_service, profile_change_history
@@ -123,13 +123,16 @@ def test_profile_change_history_helpers():
     manager_profile.full_name = ""
     manager_profile.save(update_fields=["full_name"])
 
-    assert profile_change_history.log_employee_profile_change(
-        employee=employee_profile,
-        field=TrackedField.ROLE,
-        old_value="a",
-        new_value="a",
-        changed_by=changed_by,
-    ) is None
+    assert (
+        profile_change_history.log_employee_profile_change(
+            employee=employee_profile,
+            field=TrackedField.ROLE,
+            old_value="a",
+            new_value="a",
+            changed_by=changed_by,
+        )
+        is None
+    )
 
     history = profile_change_history.log_employee_profile_change(
         employee=employee_profile,
@@ -150,7 +153,10 @@ def test_profile_change_history_helpers():
         "id": role.id,
         "name": role.name,
     }
-    assert profile_change_history._as_manager_user_id(manager_profile) == manager_profile.user_id
+    assert (
+        profile_change_history._as_manager_user_id(manager_profile)
+        == manager_profile.user_id
+    )
     assert profile_change_history._as_manager_user_id("9") == 9
     assert profile_change_history._as_manager_user_id(0) is None
     assert profile_change_history._as_manager_user_id("bad") is None
@@ -197,9 +203,14 @@ def test_document_query_service_filters_and_lookup():
 
     assert document_query_service.document_queryset().count() == 1
     assert document_query_service.document_queryset(include_archived=True).count() == 2
-    assert document_query_service.get_document_for_api(active_doc.pk).pk == active_doc.pk
+    assert (
+        document_query_service.get_document_for_api(active_doc.pk).pk == active_doc.pk
+    )
     assert document_query_service.get_document_for_api(999999) is None
-    assert document_query_service.get_document_for_response(active_doc.pk).pk == active_doc.pk
+    assert (
+        document_query_service.get_document_for_response(active_doc.pk).pk
+        == active_doc.pk
+    )
     with pytest.raises(Document.DoesNotExist):
         document_query_service.get_document_for_response(999999)
 
@@ -260,7 +271,9 @@ def test_generate_avatar_command_branches(monkeypatch):
         email="noprof@example.com",
         get_full_name=lambda: "No Profile",
     )
-    monkeypatch.setattr(cmd_mod.User.objects, "get", lambda **kwargs: fake_user_missing_profile)
+    monkeypatch.setattr(
+        cmd_mod.User.objects, "get", lambda **kwargs: fake_user_missing_profile
+    )
     out = io.StringIO()
     call_command("generate_avatar", username="noprof", stdout=out)
     assert "User profile not found" in out.getvalue()
@@ -349,7 +362,9 @@ def test_regenerate_avatars_command_branches(monkeypatch):
     missing_avatar = FakeAvatar()
     existing_avatar = FakeAvatar("avatars/old.png")
     missing_profile = FakeProfile(1, 11, "missing", "Missing Avatar", missing_avatar)
-    existing_profile = FakeProfile(2, 22, "existing", "Existing Avatar", existing_avatar)
+    existing_profile = FakeProfile(
+        2, 22, "existing", "Existing Avatar", existing_avatar
+    )
 
     monkeypatch.setattr(
         UserProfile.objects,
@@ -413,9 +428,10 @@ def test_seed_project_and_vacation_data_commands():
     out = io.StringIO()
     call_command("seed_projects_data_model", stdout=out)
     assert "Seeded projects + assignments" in out.getvalue()
-    assert Project.objects.filter(
-        name__in=["Acme Portal", "Internal Tooling"]
-    ).count() == 2
+    assert (
+        Project.objects.filter(name__in=["Acme Portal", "Internal Tooling"]).count()
+        == 2
+    )
     assert ProjectAssignment.objects.filter(project__name="Acme Portal").exists()
 
     out = io.StringIO()
@@ -425,5 +441,9 @@ def test_seed_project_and_vacation_data_commands():
         stdout=out,
     )
     assert "Vacations test data seeded." in out.getvalue()
-    assert Project.objects.filter(name__in=["Project Alpha", "Project Beta"]).count() == 2
-    assert User.objects.filter(username__in=["alice", "bob", "carol", "dave"]).count() == 4
+    assert (
+        Project.objects.filter(name__in=["Project Alpha", "Project Beta"]).count() == 2
+    )
+    assert (
+        User.objects.filter(username__in=["alice", "bob", "carol", "dave"]).count() == 4
+    )

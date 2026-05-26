@@ -1,19 +1,14 @@
 import importlib
 import io
-import sys
-from datetime import date, datetime
-from decimal import Decimal
+from datetime import datetime
 from types import SimpleNamespace
 
 import pytest
-from PIL import Image
 from django.contrib.auth.models import User
-from django.core.files.base import ContentFile
-from django.core.files.storage import default_storage
-from django.test import override_settings
+from PIL import Image
 from rest_framework.exceptions import NotFound
 
-from core.avatar_utils import generate_initials_avatar_png, get_initials, _pick_colors
+from core.avatar_utils import _pick_colors, generate_initials_avatar_png, get_initials
 from core.enums import TemplateStatus, TemplateVisibility
 from core.models import (
     DocumentTemplate,
@@ -26,12 +21,10 @@ from core.services.document_signature_permissions import (
     can_send_signature_reminder,
     can_sign_for,
 )
-from core.services.mail import leave_notifications, mailer, recipients
 from core.utils import (
     apply_profile_updates_and_save,
     clone_template,
     download_and_save_avatar,
-    generate_presigned_url,
     generate_secure_password,
     generate_unique_username,
     get_role_permissions_bitmap,
@@ -42,7 +35,6 @@ from core.utils import (
     normalize_trimmed_string,
     resolve_template_content,
     upgrade_google_picture_url,
-    uploader_display_name,
     validate_template_fields,
     verify_google_id_token,
 )
@@ -81,13 +73,17 @@ def test_config_settings_postgres_tenant_branch(monkeypatch):
         SITE_URL="https://example.com",
     )
     assert settings_mod.USE_TENANTS is True
-    assert settings_mod.DATABASES["default"]["ENGINE"] == "django_tenants.postgresql_backend"
+    assert (
+        settings_mod.DATABASES["default"]["ENGINE"]
+        == "django_tenants.postgresql_backend"
+    )
     assert "django_tenants" in settings_mod.INSTALLED_APPS
 
 
 def test_r2_storage_connection_paths(monkeypatch):
-    from config.storage import R2Storage
     from django.conf import settings as django_settings
+
+    from config.storage import R2Storage
 
     monkeypatch.setattr(django_settings, "AWS_S3_VERIFY", False, raising=False)
 
@@ -154,7 +150,9 @@ def test_generate_unique_username_and_permissions_bitmap():
     perm = Permission.objects.create(module_name="Documents", feature_action="review")
     role.permissions.add(perm)
 
-    user = User.objects.create_user(username="jane", email="jane@example.com", password="x")
+    user = User.objects.create_user(
+        username="jane", email="jane@example.com", password="x"
+    )
     profile = user.profile
     profile.role = role
     profile.permissions = ""
@@ -185,13 +183,21 @@ def test_verify_google_id_token(monkeypatch):
 
 
 def test_upgrade_google_picture_url_and_normalizers():
-    assert upgrade_google_picture_url("https://x/photo=s96-c", 400) == "https://x/photo=s400-c"
-    assert upgrade_google_picture_url("https://x/photo", 400) == "https://x/photo=s400-c"
+    assert (
+        upgrade_google_picture_url("https://x/photo=s96-c", 400)
+        == "https://x/photo=s400-c"
+    )
+    assert (
+        upgrade_google_picture_url("https://x/photo", 400) == "https://x/photo=s400-c"
+    )
     assert normalize_trimmed_string("  hi  ") == "hi"
     assert normalize_trimmed_string("   ") is None
     assert normalize_enum_like("  ABC  ") == "abc"
     assert normalize_iso_date(datetime(2026, 1, 2, 3, 4, 5)) == "2026-01-02"
-    assert normalize_manager_ids([1, "2", SimpleNamespace(user_id=2), 0, -1, None]) == [1, 2]
+    assert normalize_manager_ids([1, "2", SimpleNamespace(user_id=2), 0, -1, None]) == [
+        1,
+        2,
+    ]
 
 
 def test_template_helpers_and_download_avatar(monkeypatch):
@@ -211,11 +217,16 @@ def test_template_helpers_and_download_avatar(monkeypatch):
             self.saved = (name, content.read(), save)
 
     profile = SimpleNamespace(user_id=7, avatar=Avatar())
-    monkeypatch.setattr("urllib.request.urlopen", lambda req, timeout=10: io.BytesIO(b"png-bytes"))
+    monkeypatch.setattr(
+        "urllib.request.urlopen", lambda req, timeout=10: io.BytesIO(b"png-bytes")
+    )
     assert download_and_save_avatar(profile, "https://example.com/photo=s96-c") is True
     assert profile.avatar.saved[0] == "avatar.png"
 
-    monkeypatch.setattr("urllib.request.urlopen", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
     assert download_and_save_avatar(profile, "https://example.com/photo") is False
 
 
@@ -263,7 +274,12 @@ def test_document_signature_permission_helpers(monkeypatch):
     class UserObj(SimpleNamespace):
         pass
 
-    user = UserObj(is_authenticated=True, is_staff=False, is_superuser=False, email="owner@example.com")
+    user = UserObj(
+        is_authenticated=True,
+        is_staff=False,
+        is_superuser=False,
+        email="owner@example.com",
+    )
     signer = SimpleNamespace(email="owner@example.com")
 
     monkeypatch.setattr(
@@ -276,6 +292,12 @@ def test_document_signature_permission_helpers(monkeypatch):
     )
     assert can_initiate_signature_request(user) is False
     assert can_send_signature_reminder(user) is False
-    assert can_sign_for(UserObj(is_authenticated=False, email="owner@example.com"), signer) is False
+    assert (
+        can_sign_for(UserObj(is_authenticated=False, email="owner@example.com"), signer)
+        is False
+    )
     assert can_sign_for(user, signer) is True
-    assert can_sign_for(UserObj(is_authenticated=True, email="other@example.com"), signer) is True
+    assert (
+        can_sign_for(UserObj(is_authenticated=True, email="other@example.com"), signer)
+        is True
+    )
