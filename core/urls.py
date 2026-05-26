@@ -33,6 +33,8 @@ from .views import (
     JobApplicationViewSet,
     JobListingViewSet,
     LeaveAdjustmentViewSet,
+    LeaveAnalyticsViewSet,
+    LeaveBalanceSnapshotViewSet,
     LeaveBalanceViewSet,
     LeavePolicyViewSet,
     LeaveRequestViewSet,
@@ -96,6 +98,12 @@ router.register(r"leave-balances", LeaveBalanceViewSet, basename="leave-balance"
 router.register(r"leave-requests", LeaveRequestViewSet, basename="leave-request")
 router.register(
     r"leave-adjustments", LeaveAdjustmentViewSet, basename="leave-adjustment"
+)
+router.register(r"leave-analytics", LeaveAnalyticsViewSet, basename="leave-analytics")
+router.register(
+    r"leave-balance-snapshots",
+    LeaveBalanceSnapshotViewSet,
+    basename="leave-balance-snapshot",
 )
 router.register(
     r"performance-reviews", PerformanceReviewViewSet, basename="performance-review"

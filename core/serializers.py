@@ -3693,9 +3693,7 @@ class LeaveMonthlyAggregateSerializer(serializers.ModelSerializer):
     employee_name = serializers.CharField(
         source="employee.user.get_full_name", read_only=True
     )
-    department = serializers.CharField(
-        source="employee.department", read_only=True
-    )
+    department = serializers.CharField(source="employee.department", read_only=True)
     leave_type_display = serializers.CharField(
         source="get_leave_type_display", read_only=True
     )
@@ -3775,11 +3773,14 @@ class LeaveAnalyticsMonthRowSerializer(serializers.Serializer):
 
 
 class LeaveAnalyticsYearTotalsSerializer(serializers.Serializer):
-    """Shape of `yearly_totals` action output."""
+    """Shape of `yearly_totals` action output (also doubles as KPI payload)."""
 
     year = serializers.IntegerField()
     total = serializers.IntegerField()
     by_type = serializers.DictField(child=serializers.IntegerField())
+    pending_total = serializers.IntegerField()
+    headcount = serializers.IntegerField()
+    on_leave_today = serializers.IntegerField()
 
 
 class LeaveAnalyticsDepartmentRowSerializer(serializers.Serializer):
@@ -3810,6 +3811,4 @@ class LeaveAnalyticsRefreshResponseSerializer(serializers.Serializer):
     created_count = serializers.IntegerField()
     updated_count = serializers.IntegerField()
     deleted_count = serializers.IntegerField(required=False, default=0)
-    snapshots = serializers.DictField(
-        child=serializers.IntegerField(), required=False
-    )
+    snapshots = serializers.DictField(child=serializers.IntegerField(), required=False)
