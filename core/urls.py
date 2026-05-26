@@ -30,6 +30,7 @@ from .views import (
     EmployeeProfileViewSet,
     EmployeeTechLeadsView,
     GoogleExchangeView,
+    JiraAssignedIssueImportView,
     JiraImportCommitView,
     JiraImportPreviewView,
     JiraMappingsView,
@@ -351,6 +352,11 @@ urlpatterns = [
         "time-imports/jira/preview/",
         JiraImportPreviewView.as_view(),
         name="time_jira_import_preview",
+    ),
+    path(
+        "time-imports/jira/assigned-issues/",
+        JiraAssignedIssueImportView.as_view(),
+        name="time_jira_assigned_issue_import",
     ),
     path(
         "time-imports/jira/commit/",
