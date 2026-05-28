@@ -15,10 +15,14 @@ from .views import (
     AssignmentRequestReturnView,
     AssignmentReturnView,
     AvatarUploadView,
+    BenefitCatalogViewSet,
+    BonusRecordViewSet,
     CertificateViewSet,
     ChecklistInstanceViewSet,
     ChecklistTaskViewSet,
     ChecklistTemplateViewSet,
+    CompensationOverviewView,
+    CompensationPolicyViewSet,
     ConferenceCourseRegistrationViewSet,
     CPFLevelChangeViewSet,
     CPFLevelListView,
@@ -26,10 +30,17 @@ from .views import (
     DocumentCategoryDefaultsView,
     DocumentTemplateViewSet,
     DocumentViewSet,
+    EmployeeBonusListView,
     EmployeeProfileChangeHistoryView,
     EmployeeProfileViewSet,
     EmployeeTechLeadsView,
     GoogleExchangeView,
+    JiraImportCommitView,
+    JiraImportPreviewView,
+    JiraMappingsView,
+    JiraProjectDiscoveryView,
+    JiraSettingsView,
+    JiraTestConnectionView,
     JobApplicationViewSet,
     JobListingViewSet,
     LeaveAdjustmentViewSet,
@@ -64,6 +75,28 @@ from .views import (
     ScheduledMaintenanceDetailView,
     ScheduledMaintenanceListView,
     SessionView,
+    TempoImportCommitView,
+    TempoImportPreviewView,
+    TempoMappingsView,
+    TempoProjectDiscoveryView,
+    TempoSettingsView,
+    TempoTestConnectionView,
+    TimeDocumentImportColumnMapView,
+    TimeDocumentImportUploadView,
+    TimeEntryViewSet,
+    TimeImportBatchCommitView,
+    TimeImportBatchDetailView,
+    TimeImportBatchListView,
+    TimeImportBatchPreviewView,
+    TimeTaskViewSet,
+    TimeTrackingActiveAllocationsView,
+    TimeTrackingApprovalQueueView,
+    TimeTrackingPlannedVsActualView,
+    TimeTrackingSourceChangeResolveView,
+    TimeTrackingSourceChangeReviewView,
+    TimeTrackingTimesheetExportView,
+    TimeTrackingWeeklyDashboardView,
+    TimeTrackingWeeklySummaryView,
     TokenRefreshViewCustom,
     TrainingBudgetViewSet,
     TrainingEntryViewSet,
@@ -114,6 +147,8 @@ router.register(
     basename="performance-review-reminder",
 )
 router.register(r"training-entries", TrainingEntryViewSet, basename="training-entry")
+router.register(r"time-tasks", TimeTaskViewSet, basename="time-task")
+router.register(r"time-entries", TimeEntryViewSet, basename="time-entry")
 router.register(r"training-budgets", TrainingBudgetViewSet, basename="training-budget")
 router.register(r"peer-sessions", PeerSessionViewSet, basename="peer-session")
 router.register(r"certificates", CertificateViewSet, basename="certificate")
@@ -130,6 +165,13 @@ router.register(
 )
 router.register(
     r"cpf-level-changes", CPFLevelChangeViewSet, basename="cpf-level-change"
+)
+router.register(r"bonuses", BonusRecordViewSet, basename="bonus")
+router.register(
+    r"compensation/policies", CompensationPolicyViewSet, basename="compensation-policy"
+)
+router.register(
+    r"compensation/benefits", BenefitCatalogViewSet, basename="benefit-catalog"
 )
 
 urlpatterns = [
@@ -266,9 +308,149 @@ urlpatterns = [
         name="employee_profile_change_history",
     ),
     path(
+        "time-tracking/weekly-summary/",
+        TimeTrackingWeeklySummaryView.as_view(),
+        name="time_tracking_weekly_summary",
+    ),
+    path(
+        "time-tracking/active-allocations/",
+        TimeTrackingActiveAllocationsView.as_view(),
+        name="time_tracking_active_allocations",
+    ),
+    path(
+        "time-tracking/weekly-dashboard/",
+        TimeTrackingWeeklyDashboardView.as_view(),
+        name="time_tracking_weekly_dashboard",
+    ),
+    path(
+        "time-tracking/approval-queue/",
+        TimeTrackingApprovalQueueView.as_view(),
+        name="time_tracking_approval_queue",
+    ),
+    path(
+        "time-tracking/planned-vs-actual/",
+        TimeTrackingPlannedVsActualView.as_view(),
+        name="time_tracking_planned_vs_actual",
+    ),
+    path(
+        "time-tracking/exports/timesheets/",
+        TimeTrackingTimesheetExportView.as_view(),
+        name="time_tracking_timesheet_export",
+    ),
+    path(
+        "time-tracking/source-change-review/",
+        TimeTrackingSourceChangeReviewView.as_view(),
+        name="time_tracking_source_change_review",
+    ),
+    path(
+        "time-tracking/source-change-review/<int:entry_id>/resolve/",
+        TimeTrackingSourceChangeResolveView.as_view(),
+        name="time_tracking_source_change_resolve",
+    ),
+    path(
+        "time-integrations/jira/settings/",
+        JiraSettingsView.as_view(),
+        name="time_jira_settings",
+    ),
+    path(
+        "time-integrations/jira/test-connection/",
+        JiraTestConnectionView.as_view(),
+        name="time_jira_test_connection",
+    ),
+    path(
+        "time-integrations/jira/mappings/",
+        JiraMappingsView.as_view(),
+        name="time_jira_mappings",
+    ),
+    path(
+        "time-integrations/jira/project-discovery/",
+        JiraProjectDiscoveryView.as_view(),
+        name="time_jira_project_discovery",
+    ),
+    path(
+        "time-imports/jira/preview/",
+        JiraImportPreviewView.as_view(),
+        name="time_jira_import_preview",
+    ),
+    path(
+        "time-imports/jira/commit/",
+        JiraImportCommitView.as_view(),
+        name="time_jira_import_commit",
+    ),
+    path(
+        "time-integrations/tempo/settings/",
+        TempoSettingsView.as_view(),
+        name="time_tempo_settings",
+    ),
+    path(
+        "time-integrations/tempo/test-connection/",
+        TempoTestConnectionView.as_view(),
+        name="time_tempo_test_connection",
+    ),
+    path(
+        "time-integrations/tempo/mappings/",
+        TempoMappingsView.as_view(),
+        name="time_tempo_mappings",
+    ),
+    path(
+        "time-integrations/tempo/project-discovery/",
+        TempoProjectDiscoveryView.as_view(),
+        name="time_tempo_project_discovery",
+    ),
+    path(
+        "time-imports/tempo/preview/",
+        TempoImportPreviewView.as_view(),
+        name="time_tempo_import_preview",
+    ),
+    path(
+        "time-imports/tempo/commit/",
+        TempoImportCommitView.as_view(),
+        name="time_tempo_import_commit",
+    ),
+    path(
+        "time-imports/documents/upload/",
+        TimeDocumentImportUploadView.as_view(),
+        name="time_document_import_upload",
+    ),
+    path(
+        "time-imports/documents/<int:batch_id>/map-columns/",
+        TimeDocumentImportColumnMapView.as_view(),
+        name="time_document_import_map_columns",
+    ),
+    path(
+        "time-imports/",
+        TimeImportBatchListView.as_view(),
+        name="time_import_batch_list",
+    ),
+    path(
+        "time-imports/<int:batch_id>/",
+        TimeImportBatchDetailView.as_view(),
+        name="time_import_batch_detail",
+    ),
+    path(
+        "time-imports/<int:batch_id>/preview/",
+        TimeImportBatchPreviewView.as_view(),
+        name="time_import_batch_preview",
+    ),
+    path(
+        "time-imports/<int:batch_id>/commit/",
+        TimeImportBatchCommitView.as_view(),
+        name="time_import_batch_commit",
+    ),
+    path(
         "employees/<int:employee_id>/tech-leads/",
         EmployeeTechLeadsView.as_view(),
         name="employee_tech_leads",
+    ),
+    path(
+        "employees/<int:employee_id>/bonuses/",
+        EmployeeBonusListView.as_view(),
+        name="employee_bonuses",
+    ),
+    path(
+        "compensation/overview/",
+        CompensationOverviewView.as_view(),
+        name="compensation_overview",
     ),
     path(
         "documents/category-defaults/",
