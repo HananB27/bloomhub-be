@@ -7,7 +7,7 @@ from django.contrib.auth.models import User
 from django.core.files.base import ContentFile
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
-from django.db.models.signals import post_save
+from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
 from django.utils import timezone
 from django.utils.text import slugify
@@ -1670,6 +1670,36 @@ class LeaveRequest(models.Model):
             overlapping = overlapping.exclude(pk=self.pk)
 
         return overlapping.exists()
+
+
+def _rebuild_leave_analytics_for(employee_id: int) -> None:
+    from django.db import transaction as _transaction
+
+    from core.services.leave_analytics_service import (
+        materialize_leave_monthly_aggregates,
+    )
+
+    def _run():
+        employee = UserProfile.objects.filter(pk=employee_id).first()
+        if employee is None:
+            return
+        materialize_leave_monthly_aggregates(employee=employee)
+
+    _transaction.on_commit(_run)
+
+
+@receiver(post_save, sender=LeaveRequest)
+def rebuild_leave_analytics_on_request_save(sender, instance, **kwargs):
+    if kwargs.get("raw") or instance.employee_id is None:
+        return
+    _rebuild_leave_analytics_for(instance.employee_id)
+
+
+@receiver(post_delete, sender=LeaveRequest)
+def rebuild_leave_analytics_on_request_delete(sender, instance, **kwargs):
+    if instance.employee_id is None:
+        return
+    _rebuild_leave_analytics_for(instance.employee_id)
 
 
 class LeaveApprovalWorkflow(models.Model):
