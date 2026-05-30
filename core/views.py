@@ -10385,16 +10385,26 @@ class SurveyViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
-        # `?mine=true` narrows the list to surveys created by the current
-        # user — used by the management table so each HR user sees only
-        # their own work. Without the flag, the list is unscoped (used by
-        # the Take Survey picker so every active survey is discoverable).
-        if self.action == "list" and self.request.query_params.get("mine") == "true":
+        if self.action == "list":
+            # `?mine=true` narrows the list to surveys created by the current
+            # user — used by the management table so each HR user sees only
+            # their own work. Without the flag, the list is unscoped, but
+            # surveys that explicitly forbid the current user are hidden so
+            # the Take-Survey picker never offers a blocked survey.
+            mine = self.request.query_params.get("mine") == "true"
             try:
                 profile = self.request.user.profile
             except (AttributeError, UserProfile.DoesNotExist):
-                return qs.none()
-            return qs.filter(created_by=profile)
+                profile = None
+            if mine:
+                if profile is None:
+                    return qs.none()
+                return qs.filter(created_by=profile)
+            is_admin = getattr(self.request.user, "is_staff", False) or getattr(
+                self.request.user, "is_superuser", False
+            )
+            if not is_admin and profile is not None:
+                qs = qs.exclude(forbidden_users=profile)
         return qs
 
     def get_permissions(self):
@@ -10703,15 +10713,22 @@ class SurveyViewSet(viewsets.ModelViewSet):
         except (AttributeError, UserProfile.DoesNotExist):
             profile = None
 
-        # Dedup for non-anonymous surveys.
+        # Block users explicitly forbidden from this survey.
+        if (
+            profile is not None
+            and survey.forbidden_users.filter(pk=profile.pk).exists()
+        ):
+            return Response(
+                {"detail": "You are not allowed to take this survey."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Override behaviour: for non-anonymous surveys, a second submission by
+        # the same user replaces the previous one (cascade-deletes old answers).
+        # Anonymous surveys always accept new submissions because there's no
+        # respondent linkage to dedupe on.
         if not survey.is_anonymous and profile is not None:
-            if SurveyResponse.objects.filter(
-                survey=survey, respondent=profile
-            ).exists():
-                return Response(
-                    {"detail": "You have already responded to this survey."},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
+            SurveyResponse.objects.filter(survey=survey, respondent=profile).delete()
 
         answers_payload = request.data.get("answers")
         if not isinstance(answers_payload, list) or not answers_payload:

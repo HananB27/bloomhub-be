@@ -102,12 +102,36 @@ class SurveyResponseSubmissionTests(APITestCase):
         resp = self._submit()
         self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
 
-    def test_named_survey_blocks_duplicate_submission(self):
+    def test_named_survey_overrides_previous_submission(self):
         self.client.force_authenticate(user=self.user)
-        first = self._submit()
+        first = self._submit(scale="1", choice="A", text="initial")
         self.assertEqual(first.status_code, status.HTTP_201_CREATED)
-        second = self._submit()
-        self.assertEqual(second.status_code, status.HTTP_400_BAD_REQUEST)
+        second = self._submit(scale="5", choice="B", text="updated")
+        self.assertEqual(second.status_code, status.HTTP_201_CREATED)
+        # Only one response remains for this user.
+        self.assertEqual(
+            SurveyResponse.objects.filter(
+                survey=self.survey, respondent=self.profile
+            ).count(),
+            1,
+        )
+        saved = SurveyResponse.objects.get(
+            survey=self.survey, respondent=self.profile
+        )
+        self.assertEqual(
+            Answer.objects.get(question=self.q1, response=saved).value,
+            "5",
+        )
+        self.assertEqual(
+            Answer.objects.get(question=self.q3, response=saved).value,
+            "updated",
+        )
+
+    def test_forbidden_user_cannot_submit(self):
+        self.survey.forbidden_users.add(self.profile)
+        self.client.force_authenticate(user=self.user)
+        resp = self._submit()
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_named_survey_allows_different_users(self):
         self.client.force_authenticate(user=self.user)

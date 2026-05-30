@@ -3983,6 +3983,12 @@ class Survey(models.Model):
         blank=True,
         help_text="Optional cutoff. Submissions are rejected after this date.",
     )
+    forbidden_users = models.ManyToManyField(
+        "UserProfile",
+        blank=True,
+        related_name="forbidden_surveys",
+        help_text="Users explicitly blocked from seeing or submitting this survey.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     created_by = models.ForeignKey(
         "UserProfile",

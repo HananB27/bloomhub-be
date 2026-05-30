@@ -17110,6 +17110,10 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/QuestionRequest'
+        forbidden_user_ids:
+          type: array
+          items:
+            type: integer
     PatchedTempoConnectionRequest:
       type: object
       properties:
@@ -19572,6 +19576,10 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Question'
+        forbidden_user_ids:
+          type: array
+          items:
+            type: integer
         created_at:
           type: string
           format: date-time
@@ -19623,6 +19631,10 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/QuestionRequest'
+        forbidden_user_ids:
+          type: array
+          items:
+            type: integer
       required:
       - title
     SurveyStatusEnum:

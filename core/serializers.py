@@ -4929,6 +4929,12 @@ class SurveySerializer(serializers.ModelSerializer):
     questions = QuestionSerializer(many=True, required=False)
     created_by_name = serializers.SerializerMethodField()
     response_count = serializers.SerializerMethodField()
+    forbidden_user_ids = serializers.PrimaryKeyRelatedField(
+        source="forbidden_users",
+        many=True,
+        queryset=UserProfile.objects.all(),
+        required=False,
+    )
 
     class Meta:
         model = Survey
@@ -4940,6 +4946,7 @@ class SurveySerializer(serializers.ModelSerializer):
             "status",
             "end_date",
             "questions",
+            "forbidden_user_ids",
             "created_at",
             "created_by",
             "created_by_name",
@@ -4965,7 +4972,10 @@ class SurveySerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         questions_data = validated_data.pop("questions", [])
+        forbidden = validated_data.pop("forbidden_users", None)
         survey = Survey.objects.create(**validated_data)
+        if forbidden is not None:
+            survey.forbidden_users.set(forbidden)
         for index, question_data in enumerate(questions_data):
             question_data.pop("id", None)
             order = question_data.pop("order", None)
@@ -4978,9 +4988,12 @@ class SurveySerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         questions_data = validated_data.pop("questions", None)
+        forbidden = validated_data.pop("forbidden_users", None)
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
+        if forbidden is not None:
+            instance.forbidden_users.set(forbidden)
 
         if questions_data is not None:
             # Replace-all strategy keeps the UI simple — frontend always sends

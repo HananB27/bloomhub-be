@@ -40,7 +40,9 @@ class SurveyAPITests(APITestCase):
         self.regular_user = User.objects.create_user(
             username="regular", email="r@test.com", password="pass"
         )
-        UserProfile.objects.get_or_create(user=self.regular_user)
+        self.regular_profile, _ = UserProfile.objects.get_or_create(
+            user=self.regular_user
+        )
 
     # ── Create ──────────────────────────────────────────────────────────────
 
@@ -163,6 +165,16 @@ class SurveyAPITests(APITestCase):
         self.client.force_authenticate(user=self.hr_user)
         resp = self.client.delete(f"/api/surveys/{survey.id}/")
         self.assertEqual(resp.status_code, status.HTTP_204_NO_CONTENT)
+
+    def test_list_hides_forbidden_surveys_from_blocked_users(self):
+        blocked = Survey.objects.create(title="Blocked", status="active")
+        blocked.forbidden_users.add(self.regular_profile)
+        Survey.objects.create(title="OpenToAll", status="active")
+        self.client.force_authenticate(user=self.regular_user)
+        resp = self.client.get("/api/surveys/")
+        titles = [s["title"] for s in resp.data]
+        self.assertIn("OpenToAll", titles)
+        self.assertNotIn("Blocked", titles)
 
     def test_list_mine_filter_returns_only_own_surveys(self):
         # hr_user creates two surveys; another HR user creates one.
