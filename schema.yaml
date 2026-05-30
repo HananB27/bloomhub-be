@@ -18660,6 +18660,9 @@ components:
           format: int64
         options:
           description: List of option strings for choice questions; ignored otherwise.
+        required:
+          type: boolean
+          description: If true, respondents must provide a non-empty answer.
       required:
       - text
     QuestionRequest:
@@ -18680,6 +18683,9 @@ components:
           format: int64
         options:
           description: List of option strings for choice questions; ignored otherwise.
+        required:
+          type: boolean
+          description: If true, respondents must provide a non-empty answer.
       required:
       - text
     QuestionTypeEnum:

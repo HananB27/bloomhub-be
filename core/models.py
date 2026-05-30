@@ -4017,6 +4017,10 @@ class Question(models.Model):
         blank=True,
         help_text="List of option strings for choice questions; ignored otherwise.",
     )
+    required = models.BooleanField(
+        default=True,
+        help_text="If true, respondents must provide a non-empty answer.",
+    )
 
     class Meta:
         verbose_name = "Question"

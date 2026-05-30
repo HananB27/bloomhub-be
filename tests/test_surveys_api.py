@@ -164,6 +164,30 @@ class SurveyAPITests(APITestCase):
         resp = self.client.delete(f"/api/surveys/{survey.id}/")
         self.assertEqual(resp.status_code, status.HTTP_204_NO_CONTENT)
 
+    def test_list_mine_filter_returns_only_own_surveys(self):
+        # hr_user creates two surveys; another HR user creates one.
+        Survey.objects.create(title="Mine 1", created_by=self.hr_profile)
+        Survey.objects.create(title="Mine 2", created_by=self.hr_profile)
+
+        other_hr = User.objects.create_user(
+            username="hr2", email="hr2@test.com", password="pass", is_staff=True
+        )
+        other_profile = UserProfile.objects.get(user=other_hr)
+        other_profile.role = self.hr_role
+        other_profile.save()
+        Survey.objects.create(title="Not Mine", created_by=other_profile)
+
+        self.client.force_authenticate(user=self.hr_user)
+        all_resp = self.client.get("/api/surveys/")
+        mine_resp = self.client.get("/api/surveys/?mine=true")
+        self.assertEqual(all_resp.status_code, 200)
+        self.assertEqual(mine_resp.status_code, 200)
+        self.assertGreaterEqual(len(all_resp.data), 3)
+        mine_titles = [s["title"] for s in mine_resp.data]
+        self.assertIn("Mine 1", mine_titles)
+        self.assertIn("Mine 2", mine_titles)
+        self.assertNotIn("Not Mine", mine_titles)
+
     def test_cannot_edit_survey_past_end_date(self):
         from datetime import date, timedelta
 

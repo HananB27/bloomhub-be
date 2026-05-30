@@ -10383,6 +10383,20 @@ class SurveyViewSet(viewsets.ModelViewSet):
         .all()
     )
 
+    def get_queryset(self):
+        qs = super().get_queryset()
+        # `?mine=true` narrows the list to surveys created by the current
+        # user — used by the management table so each HR user sees only
+        # their own work. Without the flag, the list is unscoped (used by
+        # the Take Survey picker so every active survey is discoverable).
+        if self.action == "list" and self.request.query_params.get("mine") == "true":
+            try:
+                profile = self.request.user.profile
+            except (AttributeError, UserProfile.DoesNotExist):
+                return qs.none()
+            return qs.filter(created_by=profile)
+        return qs
+
     def get_permissions(self):
         # `submit_response` is open to any authenticated user — that's the
         # whole point of letting employees take surveys. HR gating still
@@ -10707,8 +10721,11 @@ class SurveyViewSet(viewsets.ModelViewSet):
             )
 
         # Validate every question_id belongs to this survey.
-        valid_question_ids = set(survey.questions.values_list("id", flat=True))
+        survey_questions = list(survey.questions.all())
+        valid_question_ids = {q.id for q in survey_questions}
+        required_ids = {q.id for q in survey_questions if q.required}
         clean: list[tuple[int, str]] = []
+        answered_ids: set[int] = set()
         for item in answers_payload:
             if not isinstance(item, dict):
                 return Response(
@@ -10721,8 +10738,31 @@ class SurveyViewSet(viewsets.ModelViewSet):
                     {"detail": (f"Question {qid} does not belong to this survey.")},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-            value = item.get("value", "")
-            clean.append((int(qid), str(value)))
+            value = str(item.get("value", ""))
+            if qid in required_ids and not value.strip():
+                return Response(
+                    {
+                        "detail": (
+                            f"Question {qid} is required and must have a "
+                            "non-empty answer."
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            answered_ids.add(int(qid))
+            clean.append((int(qid), value))
+
+        missing_required = required_ids - answered_ids
+        if missing_required:
+            return Response(
+                {
+                    "detail": (
+                        f"Missing required answers for question(s): "
+                        f"{sorted(missing_required)}"
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         # Persist response + answers in a transaction.
         from django.db import transaction

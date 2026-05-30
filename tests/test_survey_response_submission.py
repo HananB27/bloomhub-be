@@ -152,6 +152,54 @@ class SurveyResponseSubmissionTests(APITestCase):
         resp = self._submit()
         self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
 
+    def test_required_question_must_have_value(self):
+        # All questions in the fixture default to required=True.
+        self.client.force_authenticate(user=self.user)
+        resp = self.client.post(
+            f"/api/surveys/{self.survey.id}/responses/",
+            {
+                "answers": [
+                    {"question_id": self.q1.id, "value": ""},
+                    {"question_id": self.q2.id, "value": "A"},
+                    {"question_id": self.q3.id, "value": "ok"},
+                ]
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_optional_question_can_be_blank(self):
+        self.q3.required = False
+        self.q3.save()
+        self.client.force_authenticate(user=self.user)
+        resp = self.client.post(
+            f"/api/surveys/{self.survey.id}/responses/",
+            {
+                "answers": [
+                    {"question_id": self.q1.id, "value": "4"},
+                    {"question_id": self.q2.id, "value": "A"},
+                    {"question_id": self.q3.id, "value": ""},
+                ]
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+
+    def test_missing_required_answer_rejected(self):
+        # Don't include q3 at all; it's required → reject.
+        self.client.force_authenticate(user=self.user)
+        resp = self.client.post(
+            f"/api/surveys/{self.survey.id}/responses/",
+            {
+                "answers": [
+                    {"question_id": self.q1.id, "value": "4"},
+                    {"question_id": self.q2.id, "value": "A"},
+                ]
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
     def test_empty_answers_rejected(self):
         self.client.force_authenticate(user=self.user)
         resp = self.client.post(
