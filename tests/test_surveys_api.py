@@ -164,6 +164,24 @@ class SurveyAPITests(APITestCase):
         resp = self.client.delete(f"/api/surveys/{survey.id}/")
         self.assertEqual(resp.status_code, status.HTTP_204_NO_CONTENT)
 
+    def test_cannot_edit_survey_past_end_date(self):
+        from datetime import date, timedelta
+
+        survey = Survey.objects.create(
+            title="Locked",
+            is_anonymous=False,
+            end_date=date.today() - timedelta(days=1),
+        )
+        self.client.force_authenticate(user=self.hr_user)
+        resp = self.client.patch(
+            f"/api/surveys/{survey.id}/",
+            {"title": "Renamed"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        survey.refresh_from_db()
+        self.assertEqual(survey.title, "Locked")
+
     def test_cannot_delete_survey_with_responses(self):
         survey = Survey.objects.create(title="Has data", is_anonymous=False)
         SurveyResponse.objects.create(survey=survey)

@@ -3978,6 +3978,11 @@ class Survey(models.Model):
             "Lifecycle state. Closed surveys keep responses but reject new ones."
         ),
     )
+    end_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text="Optional cutoff. Submissions are rejected after this date.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     created_by = models.ForeignKey(
         "UserProfile",

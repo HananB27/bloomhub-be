@@ -4938,6 +4938,7 @@ class SurveySerializer(serializers.ModelSerializer):
             "description",
             "is_anonymous",
             "status",
+            "end_date",
             "questions",
             "created_at",
             "created_by",
