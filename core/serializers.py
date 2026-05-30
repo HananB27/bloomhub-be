@@ -4929,6 +4929,7 @@ class SurveySerializer(serializers.ModelSerializer):
     questions = QuestionSerializer(many=True, required=False)
     created_by_name = serializers.SerializerMethodField()
     response_count = serializers.SerializerMethodField()
+    viewer_has_responded = serializers.SerializerMethodField()
     forbidden_user_ids = serializers.PrimaryKeyRelatedField(
         source="forbidden_users",
         many=True,
@@ -4951,6 +4952,7 @@ class SurveySerializer(serializers.ModelSerializer):
             "created_by",
             "created_by_name",
             "response_count",
+            "viewer_has_responded",
         ]
         read_only_fields = [
             "id",
@@ -4958,6 +4960,7 @@ class SurveySerializer(serializers.ModelSerializer):
             "created_by",
             "created_by_name",
             "response_count",
+            "viewer_has_responded",
         ]
 
     def get_created_by_name(self, obj) -> str:
@@ -4969,6 +4972,19 @@ class SurveySerializer(serializers.ModelSerializer):
 
     def get_response_count(self, obj) -> int:
         return obj.responses.count()
+
+    def get_viewer_has_responded(self, obj) -> bool:
+        # Anonymous surveys keep no respondent link, so we can't know.
+        if obj.is_anonymous:
+            return False
+        request = self.context.get("request")
+        if not request or not getattr(request, "user", None):
+            return False
+        try:
+            profile = request.user.profile
+        except (AttributeError, UserProfile.DoesNotExist):
+            return False
+        return obj.responses.filter(respondent=profile).exists()
 
     def create(self, validated_data):
         questions_data = validated_data.pop("questions", [])

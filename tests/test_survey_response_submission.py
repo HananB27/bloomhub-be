@@ -115,9 +115,7 @@ class SurveyResponseSubmissionTests(APITestCase):
             ).count(),
             1,
         )
-        saved = SurveyResponse.objects.get(
-            survey=self.survey, respondent=self.profile
-        )
+        saved = SurveyResponse.objects.get(survey=self.survey, respondent=self.profile)
         self.assertEqual(
             Answer.objects.get(question=self.q1, response=saved).value,
             "5",

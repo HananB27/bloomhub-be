@@ -19594,6 +19594,9 @@ components:
         response_count:
           type: integer
           readOnly: true
+        viewer_has_responded:
+          type: boolean
+          readOnly: true
       required:
       - created_at
       - created_by
@@ -19601,6 +19604,7 @@ components:
       - id
       - response_count
       - title
+      - viewer_has_responded
     SurveyRequest:
       type: object
       description: Survey with nested questions for create/update and retrieval.
