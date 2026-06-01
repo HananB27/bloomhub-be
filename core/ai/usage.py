@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from unittest.mock import Mock
 
 
 def _coerce_int(value: Any) -> int | None:
@@ -84,6 +85,12 @@ def extract_token_usage(payload: Any) -> dict[str, int]:
             choices = item.get("choices")
             if isinstance(choices, list):
                 stack.extend(choices)
+            continue
+
+        # unittest.mock objects fabricate attributes on access. Treat them as
+        # opaque payloads so tests can stub response objects without creating
+        # recursive walk explosions.
+        if isinstance(item, Mock):
             continue
 
         for attr in ("response_metadata", "usage_metadata", "llm_output"):

@@ -902,13 +902,24 @@ def run_orchestrated_turn(
                 decision["prompt"][:300],
                 len(history),
             )
-            response_text, subagent_metrics = invoke_subagent(
+            subagent_response = invoke_subagent(
                 agent,
                 message,
                 history=history,
                 planner_hint=decision["prompt"],
                 module=decision["module"],
             )
+            if isinstance(subagent_response, tuple):
+                response_text = str(subagent_response[0]) if subagent_response else ""
+                subagent_metrics = (
+                    subagent_response[1]
+                    if len(subagent_response) > 1
+                    and isinstance(subagent_response[1], dict)
+                    else {}
+                )
+            else:
+                response_text = str(subagent_response)
+                subagent_metrics = {}
             logger.warning(
                 "[AI] subagent.response module=%s response=%s",
                 decision["module"],
@@ -1097,6 +1108,13 @@ def _infer_announcement_tool(message: str) -> tuple[str | None, dict[str, Any]]:
     title = _extract_quoted_field(message, "title")
     body = _extract_quoted_field(message, "body")
     announcement_type = _extract_quoted_field(message, "type")
+    if not announcement_type:
+        match = re.search(
+            r"(?is)\btype\b\s*(?:is|:|-)?\s*([A-Za-z][A-Za-z _-]{0,50}?)(?=,|\band\b|\btitle\b|\bbody\b|$)",
+            text,
+        )
+        if match:
+            announcement_type = match.group(1).strip().rstrip(".,")
 
     if title:
         args["title"] = title
@@ -1780,6 +1798,15 @@ def run_assistant_turn(
         result = orchestrated["result"]
         response_text = orchestrated["response_text"]
         pending_after_orchestration = session.pending_confirmation or {}
+        selected_tool = (
+            result.get("tool_name")
+            or (
+                pending_after_orchestration.get("tool_name")
+                if pending_after_orchestration
+                else None
+            )
+            or selected_tool
+        )
         if pending_after_orchestration and not pending_is_expired(
             pending_after_orchestration
         ):

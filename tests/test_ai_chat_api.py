@@ -4,6 +4,7 @@ from unittest.mock import Mock, patch
 
 from django.contrib.auth.models import User
 from django.test import TestCase
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from core.ai.graph import (
@@ -33,20 +34,19 @@ from core.services.time_tracking_service import fingerprint_for_entry
 
 
 class AIChatAPITests(TestCase):
-    def setUp(self):
-        self.user = User.objects.create_user(
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = User.objects.create_user(
             username="chat-user",
             email="chat-user@example.com",
             password="password123",
             first_name="Chat",
             last_name="User",
         )
-        self.user.is_staff = True
-        self.user.save(update_fields=["is_staff"])
-        self.client = APIClient()
-        self.client.force_authenticate(self.user)
+        cls.user.is_staff = True
+        cls.user.save(update_fields=["is_staff"])
         LeaveBalance.objects.update_or_create(
-            employee=self.user.profile,
+            employee=cls.user.profile,
             leave_type="vacation",
             year=date.today().year,
             defaults={"allocated": 20, "used": 5, "carryover": 0},
@@ -60,6 +60,11 @@ class AIChatAPITests(TestCase):
                 "min_notice_in_days": 0,
             },
         )
+
+    def setUp(self):
+        self.user = User.objects.get(pk=self.__class__.user.pk)
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
 
     def test_markdown_table_separator_rows_are_removed_for_custom_renderer(self):
         text = "\n".join(
@@ -126,7 +131,10 @@ class AIChatAPITests(TestCase):
     def test_current_datetime_tool_returns_snapshot(self):
         fixed_now = datetime(2026, 6, 1, 10, 30, 5, tzinfo=UTC)
 
-        with patch("core.ai.tools.timezone.now", return_value=fixed_now):
+        with (
+            timezone.override("UTC"),
+            patch("core.ai.tools.timezone.now", return_value=fixed_now),
+        ):
             result = registry.get("get_current_datetime").handler(user=self.user)
 
         self.assertEqual(result["date"], "2026-06-01")
