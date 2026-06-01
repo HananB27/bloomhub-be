@@ -14076,6 +14076,7 @@ components:
       properties:
         announcement_type:
           type: string
+          minLength: 1
         channel_name:
           type: string
           minLength: 1
@@ -16601,6 +16602,7 @@ components:
       properties:
         announcement_type:
           type: string
+          minLength: 1
         channel_name:
           type: string
           minLength: 1
