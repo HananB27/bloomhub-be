@@ -92,11 +92,15 @@ def test_calculate_and_validate_leave_request_branches():
     )
     assert ok is False and "covering employee" in msg.lower()
 
+    # Anchor date-sensitive branches to a Monday so working-day counts do not
+    # depend on the day the suite runs.
+    days_until_monday = (7 - today.weekday()) % 7 or 7
+    next_monday = today + timedelta(days=days_until_monday)
     ok, msg = leave_service.validate_leave_request(
         profile,
         LeaveType.VACATION,
-        today + timedelta(days=5),
-        today + timedelta(days=20),
+        next_monday,
+        next_monday + timedelta(days=14),
         covering_employee=covering,
     )
     assert ok is False and "maximum" in msg.lower()
@@ -107,12 +111,6 @@ def test_calculate_and_validate_leave_request_branches():
     LeaveBalance.objects.filter(employee=profile, leave_type=LeaveType.VACATION).update(
         allocated=1, used=1
     )
-    # Anchor the request to the next Monday so the working-day count is
-    # non-zero regardless of which weekday `today` lands on. Without this
-    # the test silently passes the balance check whenever
-    # `today + 6 days` lands on a weekend.
-    days_until_monday = (7 - today.weekday()) % 7 or 7
-    next_monday = today + timedelta(days=days_until_monday)
     ok, msg = leave_service.validate_leave_request(
         profile,
         LeaveType.VACATION,
