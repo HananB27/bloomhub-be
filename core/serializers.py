@@ -5170,6 +5170,22 @@ class AnnouncementDetailSerializer(AnnouncementListSerializer):
         read_only_fields = fields
 
 
+def _normalize_announcement_type(value: Any) -> str:
+    normalized = str(value or "").strip().lower()
+    if not normalized:
+        return ""
+    for choice in Announcement.Type:
+        candidates = {
+            choice.value.lower(),
+            choice.label.lower(),
+            choice.name.lower(),
+            choice.label.replace(" ", "_").lower(),
+        }
+        if normalized in candidates:
+            return choice.value
+    return str(value or "").strip()
+
+
 class AnnouncementWriteSerializer(serializers.ModelSerializer):
     send_email_notifications = serializers.BooleanField(
         required=False, default=False, write_only=True
@@ -5190,6 +5206,12 @@ class AnnouncementWriteSerializer(serializers.ModelSerializer):
         if not value:
             raise serializers.ValidationError("Body is required.")
         return value
+
+    def validate_type(self, value: str) -> str:
+        normalized = _normalize_announcement_type(value)
+        if normalized:
+            return normalized
+        return ""
 
     def create(self, validated_data):
         validated_data.pop("send_email_notifications", None)
