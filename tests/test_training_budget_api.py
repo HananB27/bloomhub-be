@@ -20,7 +20,8 @@ from core.services.training_budget_service import recalculate_budget
 
 def _grant(profile: UserProfile, module: str, action: str) -> None:
     perm, _ = Permission.objects.get_or_create(
-        module_name=module, feature_action=action
+        module_name=module,
+        feature_action=action,
     )
     role = profile.role
     if role is None:
