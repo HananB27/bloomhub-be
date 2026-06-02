@@ -140,6 +140,44 @@ from core.utils import (
 )
 
 
+class CaseInsensitiveChoiceField(serializers.ChoiceField):
+    """ChoiceField accepting case-insensitive values and selected aliases."""
+
+    def __init__(self, *args, aliases: dict[str, str] | None = None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._normalized_choices = {
+            self._normalize(key): key for key in self.choices.keys()
+        }
+        self._aliases = {
+            self._normalize(alias): value for alias, value in (aliases or {}).items()
+        }
+
+    @staticmethod
+    def _normalize(value: Any) -> str:
+        return str(value).strip().lower().replace(" ", "_").replace("-", "_")
+
+    def to_internal_value(self, data):
+        if data == "" and self.allow_blank:
+            return ""
+        if isinstance(data, str):
+            normalized = self._normalize(data)
+            if normalized in self._aliases:
+                return self._aliases[normalized]
+            if normalized in self._normalized_choices:
+                return self._normalized_choices[normalized]
+        return super().to_internal_value(data)
+
+
+ASSET_CATEGORY_ALIASES = {
+    "laptop": AssetCategory.LAPTOPS,
+    "phone": AssetCategory.PHONES,
+    "monitor": AssetCategory.MONITORS,
+    "headphone": AssetCategory.HEADPHONES,
+    "camera": AssetCategory.CAMERAS,
+    "vehicle": AssetCategory.VEHICLES,
+}
+
+
 @extend_schema_field(OpenApiTypes.INT64)
 class NonNegativeInt64Field(serializers.IntegerField):
     """Non-negative integers documented as OpenAPI int64 (stable across environments)."""
@@ -1860,6 +1898,17 @@ class UserProfileSerializer(serializers.ModelSerializer):
 class AssetSerializer(serializers.ModelSerializer):
     """Serializer for Asset model"""
 
+    category = CaseInsensitiveChoiceField(
+        choices=AssetCategory.choices,
+        aliases=ASSET_CATEGORY_ALIASES,
+        required=False,
+        default=AssetCategory.OTHER,
+    )
+    condition = CaseInsensitiveChoiceField(
+        choices=AssetCondition.choices,
+        required=False,
+        default=AssetCondition.GOOD,
+    )
     current_assignment = serializers.SerializerMethodField()
     is_under_warranty = serializers.SerializerMethodField()
     is_available = serializers.SerializerMethodField()
@@ -2254,6 +2303,18 @@ class ScheduledMaintenanceCancelSerializer(serializers.Serializer):
 
 class AssetCreateSerializer(serializers.ModelSerializer):
     """Simplified serializer for creating assets"""
+
+    category = CaseInsensitiveChoiceField(
+        choices=AssetCategory.choices,
+        aliases=ASSET_CATEGORY_ALIASES,
+        required=False,
+        default=AssetCategory.OTHER,
+    )
+    condition = CaseInsensitiveChoiceField(
+        choices=AssetCondition.choices,
+        required=False,
+        default=AssetCondition.GOOD,
+    )
 
     class Meta:
         model = Asset

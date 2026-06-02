@@ -442,6 +442,64 @@ class AIChatAPITests(TestCase):
         )
         self.assertEqual(body["ui_action_type"], "form")
 
+    def test_asset_slot_fill_followup_merges_pending_arguments(self):
+        fake_llm = Mock()
+        fake_llm.invoke.return_value.content = (
+            '{"module":"assets","prompt":"Create asset."}'
+        )
+        fake_agent = Mock()
+        metadata_response = (
+            '{"name": "create_asset", "description": "Register a new asset in '
+            'inventory. Requires Asset configure permission.", "module": '
+            '"assets", "mutating": true, "sensitive": true, '
+            '"requires_confirmation": true, "ui_path": "", '
+            '"required_permissions": ["Asset Management: configure_asset_types"], '
+            '"workflow_topic": "create_asset", "can_run": true, '
+            '"deny_reason": "", "summary": "You can run create_asset."}'
+        )
+
+        with (
+            patch("core.ai.graph.get_llm", return_value=fake_llm),
+            patch("core.ai.graph.create_react_subagent", return_value=fake_agent),
+            patch("core.ai.graph.invoke_subagent", return_value=metadata_response),
+        ):
+            first = self.client.post(
+                "/api/ai/chat/",
+                {
+                    "message": (
+                        "Create a new asset name Macatop, id MCTP-1, "
+                        "category laptop, condition Good."
+                    )
+                },
+                format="json",
+            )
+
+        self.assertEqual(first.status_code, 200)
+        session_id = first.json()["session_id"]
+        self.assertTrue(first.json()["requires_input"])
+
+        second = self.client.post(
+            "/api/ai/chat/",
+            {
+                "session_id": session_id,
+                "message": "purchase date is 2026-06-01",
+            },
+            format="json",
+        )
+
+        self.assertEqual(second.status_code, 200)
+        body = second.json()
+        pending_args = body["pending_confirmation"]["arguments"]
+        self.assertEqual(body["tool_name"], "create_asset")
+        self.assertTrue(body["requires_confirmation"])
+        self.assertFalse(body["requires_input"])
+        self.assertEqual(pending_args["asset_id"], "MCTP-1")
+        self.assertEqual(pending_args["name"], "Macatop")
+        self.assertEqual(pending_args["category"], "laptops")
+        self.assertEqual(pending_args["condition"], "good")
+        self.assertEqual(pending_args["purchase_date"], "2026-06-01")
+        self.assertEqual(Asset.objects.count(), 0)
+
     def test_orchestrated_json_response_is_rendered_as_plain_text(self):
         fake_llm = Mock()
         fake_llm.invoke.return_value.content = (

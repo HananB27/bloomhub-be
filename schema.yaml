@@ -13214,10 +13214,10 @@ components:
           maxLength: 200
         category:
           type: string
-          description: Asset category
+          default: other
         condition:
           type: string
-          description: Current condition of the asset
+          default: good
         warranty_until:
           type: string
           format: date
@@ -13317,10 +13317,10 @@ components:
           maxLength: 200
         category:
           type: string
-          description: Asset category
+          default: other
         condition:
           type: string
-          description: Current condition of the asset
+          default: good
         warranty_until:
           type: string
           format: date
@@ -13411,10 +13411,10 @@ components:
           maxLength: 200
         category:
           type: string
-          description: Asset category
+          default: other
         condition:
           type: string
-          description: Current condition of the asset
+          default: good
         warranty_until:
           type: string
           format: date
@@ -16942,10 +16942,10 @@ components:
           maxLength: 200
         category:
           type: string
-          description: Asset category
+          default: other
         condition:
           type: string
-          description: Current condition of the asset
+          default: good
         warranty_until:
           type: string
           format: date

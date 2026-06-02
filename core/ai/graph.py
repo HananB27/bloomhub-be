@@ -931,6 +931,14 @@ def run_orchestrated_turn(
                     registry.get(direct_tool) if direct_tool else None
                 )
                 if direct_assistant_tool and direct_assistant_tool.mutating:
+                    pending = session.pending_confirmation or {}
+                    if pending.get("tool_name") == direct_tool and pending.get(
+                        "requires_input"
+                    ):
+                        direct_args = {
+                            **(pending.get("arguments") or {}),
+                            **direct_args,
+                        }
                     logger.warning(
                         "[AI] subagent.response_replaced module=%s tool=%s reason=tool_metadata",
                         decision["module"],
@@ -1157,14 +1165,8 @@ def _normalize_asset_choice(value: str) -> str:
     return aliases.get(normalized, normalized)
 
 
-def _infer_asset_tool(message: str) -> tuple[str | None, dict[str, Any]]:
+def _infer_asset_arguments(message: str) -> dict[str, Any]:
     text = message.strip()
-    lower = text.lower()
-    if "asset" not in lower and "equipment" not in lower:
-        return None, {}
-    if not any(term in lower for term in ("create", "new", "add", "register", "make")):
-        return None, {}
-
     args: dict[str, Any] = {}
 
     def quoted(label: str) -> str:
@@ -1270,7 +1272,52 @@ def _infer_asset_tool(message: str) -> tuple[str | None, dict[str, Any]]:
     if description:
         args["description"] = description
 
-    return "create_asset", args
+    return args
+
+
+def _infer_pending_asset_updates(
+    message: str, missing_fields: list[dict[str, Any]]
+) -> dict[str, Any]:
+    updates = _infer_asset_arguments(message)
+    missing_names = {field.get("field") for field in missing_fields or []}
+    if "purchase_date" in missing_names and "purchase_date" not in updates:
+        match = re.search(r"\b([0-9]{4}-[0-9]{2}-[0-9]{2})\b", message or "")
+        if match:
+            updates["purchase_date"] = match.group(1)
+    return updates
+
+
+def _merge_pending_slot_fill_arguments(
+    pending: dict[str, Any] | None,
+    message: str,
+) -> dict[str, Any] | None:
+    if not pending or not pending.get("requires_input"):
+        return None
+    if pending_is_expired(pending):
+        return None
+
+    tool_name = pending.get("tool_name")
+    if tool_name == "create_asset":
+        updates = _infer_pending_asset_updates(
+            message, pending.get("missing_fields") or []
+        )
+    else:
+        updates = {}
+
+    if not updates:
+        return None
+    return {**(pending.get("arguments") or {}), **updates}
+
+
+def _infer_asset_tool(message: str) -> tuple[str | None, dict[str, Any]]:
+    text = message.strip()
+    lower = text.lower()
+    if "asset" not in lower and "equipment" not in lower:
+        return None, {}
+    if not any(term in lower for term in ("create", "new", "add", "register", "make")):
+        return None, {}
+
+    return "create_asset", _infer_asset_arguments(message)
 
 
 def _is_count_question(message: str) -> bool:
@@ -1470,7 +1517,7 @@ def _looks_like_json_payload(text: str) -> bool:
         payload = json.loads(stripped)
     except json.JSONDecodeError:
         return False
-    return isinstance(payload, (dict, list))
+    return isinstance(payload, dict | list)
 
 
 def _summarize_json_payload(payload: Any) -> str:
@@ -1781,6 +1828,17 @@ def run_assistant_turn(
         edited = arguments or {}
         merged = {**stored_args, **edited}
         arguments = merged
+    elif not tool_name and pending_now and not pending_is_expired(pending_now):
+        merged_slot_args = _merge_pending_slot_fill_arguments(pending_now, message)
+        if merged_slot_args is not None:
+            tool_name = pending_now.get("tool_name")
+            arguments = merged_slot_args
+            logger.warning(
+                "[AI] chat.pending_slot_fill session=%s tool=%s fields=%s",
+                session.id,
+                tool_name,
+                sorted(merged_slot_args.keys()),
+            )
 
     selected_tool = tool_name
     selected_args = arguments or {}
