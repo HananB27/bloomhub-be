@@ -591,34 +591,37 @@ class TimeEntrySerializer(serializers.ModelSerializer):
             work_date=obj.work_date,
         )
 
+    @staticmethod
+    def _parse_time_string(value: str) -> str:
+        parsed_time = parse_time(value)
+        if parsed_time is not None:
+            return parsed_time.isoformat()
+        for input_format in (
+            "%I:%M%p",
+            "%I:%M %p",
+            "%I:%M:%S%p",
+            "%I:%M:%S %p",
+        ):
+            try:
+                parsed_time = datetime.strptime(
+                    value.strip().upper(), input_format
+                ).time()
+            except ValueError:
+                continue
+            break
+        if parsed_time is not None:
+            return parsed_time.isoformat()
+        parsed_datetime = parse_datetime(value)
+        if parsed_datetime is not None:
+            return parsed_datetime.time().replace(tzinfo=None).isoformat()
+        return value
+
     def to_internal_value(self, data):
         data = data.copy()
         for field in ("start_time", "end_time"):
             if field not in data or not isinstance(data[field], str):
                 continue
-            parsed_time = parse_time(data[field])
-            if parsed_time is None:
-                for input_format in (
-                    "%I:%M%p",
-                    "%I:%M %p",
-                    "%I:%M:%S%p",
-                    "%I:%M:%S %p",
-                ):
-                    try:
-                        parsed_time = datetime.strptime(
-                            data[field].strip().upper(), input_format
-                        ).time()
-                    except ValueError:
-                        continue
-                    break
-            if parsed_time is not None:
-                data[field] = parsed_time.isoformat()
-            else:
-                parsed_datetime = parse_datetime(data[field])
-                if parsed_datetime is not None:
-                    data[field] = (
-                        parsed_datetime.time().replace(tzinfo=None).isoformat()
-                    )
+            data[field] = self._parse_time_string(data[field])
         return super().to_internal_value(data)
 
     def validate(self, attrs):
@@ -1940,6 +1943,18 @@ class AssetSerializer(serializers.ModelSerializer):
         return request.build_absolute_uri(path)
 
 
+def _get_employee_avatar(profile):
+    """Get employee avatar URL from profile."""
+    try:
+        if profile.avatar_url:
+            return profile.avatar_url
+        if profile.avatar:
+            return profile.avatar.url
+    except Exception:
+        pass
+    return None
+
+
 class AssignmentSerializer(serializers.ModelSerializer):
     """Serializer for Assignment model"""
 
@@ -2505,16 +2520,7 @@ class LeaveRequestListSerializer(serializers.ModelSerializer):
         ]
 
     def get_employee_avatar(self, obj):
-        """Get employee avatar URL."""
-        try:
-            profile = obj.employee
-            if profile.avatar_url:
-                return profile.avatar_url
-            if profile.avatar:
-                return profile.avatar.url
-        except Exception:
-            pass
-        return None
+        return _get_employee_avatar(obj.employee)
 
 
 class LeaveRequestDetailSerializer(serializers.ModelSerializer):
@@ -2600,16 +2606,7 @@ class LeaveRequestDetailSerializer(serializers.ModelSerializer):
         ]
 
     def get_employee_avatar(self, obj):
-        """Get employee avatar URL."""
-        try:
-            profile = obj.employee
-            if profile.avatar_url:
-                return profile.avatar_url
-            if profile.avatar:
-                return profile.avatar.url
-        except Exception:
-            pass
-        return None
+        return _get_employee_avatar(obj.employee)
 
     def _sync_counts(self, obj):
         cached = getattr(obj, "_tempo_sync_counts", None)
@@ -2665,80 +2662,65 @@ class LeaveRequestCreateSerializer(serializers.ModelSerializer):
             "covering_employee_id",
         ]
 
-    def validate(self, data):
-        """Validate leave request data."""
+    def _validate_dates(self, data):
         from datetime import date
 
         start_date = data.get("start_date")
         end_date = data.get("end_date")
-        leave_type = data.get("leave_type")
-
-        # Validate date range
         if start_date and end_date and start_date > end_date:
             raise serializers.ValidationError(
                 {"end_date": "End date must be after start date."}
             )
-
-        # Validate not in the past
         if start_date and start_date < date.today():
             raise serializers.ValidationError(
                 {"start_date": "Start date cannot be in the past."}
             )
 
-        # Get employee from context
-        request = self.context.get("request")
-        if not request or not hasattr(request.user, "profile"):
-            raise serializers.ValidationError("User profile not found.")
-
-        employee = request.user.profile
-
-        # Check for overlapping requests
+    def _validate_overlap(self, data, employee):
         temp_request = LeaveRequest(
             employee=employee,
-            start_date=start_date,
-            end_date=end_date,
-            leave_type=leave_type,
+            start_date=data.get("start_date"),
+            end_date=data.get("end_date"),
+            leave_type=data.get("leave_type"),
         )
         if temp_request.is_overlapping(exclude_self=False):
             raise serializers.ValidationError(
                 "You already have an approved or pending leave request during this period."
             )
+        return temp_request
 
-        # Check leave policy requirements
+    def _validate_policy(self, data, leave_type, temp_request):
+        from datetime import date
+
         try:
             policy = LeavePolicy.objects.get(leave_type=leave_type)
-
-            # Check minimum notice
-            if policy.min_notice_in_days > 0:
-                notice_days = (start_date - date.today()).days
-                if notice_days < policy.min_notice_in_days:
-                    raise serializers.ValidationError(
-                        f"This leave type requires at least {policy.min_notice_in_days} days notice."
-                    )
-
-            # Check covering employee requirement
-            covering_employee_data = data.get("covering_employee")
-            if policy.requires_covering_employee and not covering_employee_data:
-                raise serializers.ValidationError(
-                    {
-                        "covering_employee_id": "This leave type requires a covering employee."
-                    }
-                )
-
-            # Check max consecutive days
-            if policy.max_consecutive_days:
-                days = temp_request.days
-                if days > policy.max_consecutive_days:
-                    raise serializers.ValidationError(
-                        f"This leave type allows maximum {policy.max_consecutive_days} consecutive days."
-                    )
-
         except LeavePolicy.DoesNotExist:
             raise serializers.ValidationError(
                 f"Leave policy for {leave_type} not found."
             )
 
-        # Check sufficient balance
+        if policy.min_notice_in_days > 0:
+            start_date = data.get("start_date")
+            notice_days = (start_date - date.today()).days
+            if notice_days < policy.min_notice_in_days:
+                raise serializers.ValidationError(
+                    f"This leave type requires at least {policy.min_notice_in_days} days notice."
+                )
+
+        covering_employee_data = data.get("covering_employee")
+        if policy.requires_covering_employee and not covering_employee_data:
+            raise serializers.ValidationError(
+                {"covering_employee_id": "This leave type requires a covering employee."}
+            )
+
+        if policy.max_consecutive_days:
+            days = temp_request.days
+            if days > policy.max_consecutive_days:
+                raise serializers.ValidationError(
+                    f"This leave type allows maximum {policy.max_consecutive_days} consecutive days."
+                )
+
+    def _validate_balance(self, employee, leave_type, temp_request):
         from datetime import datetime
 
         current_year = datetime.now().year
@@ -2746,32 +2728,50 @@ class LeaveRequestCreateSerializer(serializers.ModelSerializer):
             balance = LeaveBalance.objects.get(
                 employee=employee, leave_type=leave_type, year=current_year
             )
-            if balance.remaining < temp_request.days:
-                raise serializers.ValidationError(
-                    f"Insufficient leave balance. You have {balance.remaining} days remaining, but requesting {temp_request.days} days."
-                )
         except LeaveBalance.DoesNotExist:
             raise serializers.ValidationError(
                 f"Leave balance for {leave_type} not found for year {current_year}."
             )
+        if balance.remaining < temp_request.days:
+            raise serializers.ValidationError(
+                f"Insufficient leave balance. You have {balance.remaining} days remaining, but requesting {temp_request.days} days."
+            )
+
+    def validate(self, data):
+        """Validate leave request data."""
+        self._validate_dates(data)
+
+        request = self.context.get("request")
+        if not request or not hasattr(request.user, "profile"):
+            raise serializers.ValidationError("User profile not found.")
+
+        employee = request.user.profile
+        leave_type = data.get("leave_type")
+
+        temp_request = self._validate_overlap(data, employee)
+        self._validate_policy(data, leave_type, temp_request)
+        self._validate_balance(employee, leave_type, temp_request)
 
         return data
+
+    def _get_covering_employee(self, validated_data):
+        covering_employee_data = validated_data.pop("covering_employee", None)
+        if not covering_employee_data:
+            return None
+        covering_employee_id = covering_employee_data.get("id")
+        if not covering_employee_id:
+            return None
+        try:
+            return UserProfile.objects.get(id=covering_employee_id)
+        except UserProfile.DoesNotExist:
+            return None
 
     def create(self, validated_data):
         """Create leave request."""
         request = self.context.get("request")
         employee = request.user.profile
 
-        # Handle covering_employee
-        covering_employee_data = validated_data.pop("covering_employee", None)
-        covering_employee = None
-        if covering_employee_data:
-            covering_employee_id = covering_employee_data.get("id")
-            if covering_employee_id:
-                try:
-                    covering_employee = UserProfile.objects.get(id=covering_employee_id)
-                except UserProfile.DoesNotExist:
-                    pass
+        covering_employee = self._get_covering_employee(validated_data)
 
         leave_request = LeaveRequest.objects.create(
             employee=employee,
@@ -3266,6 +3266,27 @@ class PerformanceReviewCreateUpdateSerializer(serializers.ModelSerializer):
             "completed_at",
         ]
 
+    @staticmethod
+    def _normalize_reminder_offsets(offsets):
+        if not isinstance(offsets, list):
+            raise serializers.ValidationError(
+                {"reminder_offsets_days": "Expected a list of integer day offsets."}
+            )
+        normalized = []
+        for offset in offsets:
+            try:
+                offset_value = int(offset)
+            except (TypeError, ValueError):
+                raise serializers.ValidationError(
+                    {"reminder_offsets_days": "All reminder offsets must be valid integers."}
+                )
+            if offset_value < 0:
+                raise serializers.ValidationError(
+                    {"reminder_offsets_days": "Reminder offsets cannot be negative."}
+                )
+            normalized.append(offset_value)
+        return normalized
+
     def validate(self, data):
         period_start = data.get("period_start")
         period_end = data.get("period_end")
@@ -3283,28 +3304,7 @@ class PerformanceReviewCreateUpdateSerializer(serializers.ModelSerializer):
 
         reminder_offsets_days = data.get("reminder_offsets_days")
         if reminder_offsets_days is not None:
-            if not isinstance(reminder_offsets_days, list):
-                raise serializers.ValidationError(
-                    {"reminder_offsets_days": "Expected a list of integer day offsets."}
-                )
-            normalized_offsets = []
-            for offset in reminder_offsets_days:
-                try:
-                    offset_value = int(offset)
-                except (TypeError, ValueError):
-                    raise serializers.ValidationError(
-                        {
-                            "reminder_offsets_days": "All reminder offsets must be valid integers."
-                        }
-                    )
-                if offset_value < 0:
-                    raise serializers.ValidationError(
-                        {
-                            "reminder_offsets_days": "Reminder offsets cannot be negative."
-                        }
-                    )
-                normalized_offsets.append(offset_value)
-            data["reminder_offsets_days"] = normalized_offsets
+            data["reminder_offsets_days"] = self._normalize_reminder_offsets(reminder_offsets_days)
 
         return data
 
@@ -3583,24 +3583,14 @@ class RequestSignatureSerializer(serializers.Serializer):
 
     signers = SignerInputSerializer(many=True, allow_empty=False)
 
-    def validate_signers(self, value):
+    @staticmethod
+    def _validate_signer_emails(emails):
         from django.contrib.auth import get_user_model
         from django.db.models.functions import Lower
 
         from core.models import UserProfile
 
-        seen = set()
-        for signer in value:
-            email = signer["email"].lower()
-            if email in seen:
-                raise serializers.ValidationError(
-                    "Duplicate signer emails are not allowed."
-                )
-            seen.add(email)
-            signer["email"] = email
-
         User = get_user_model()
-        emails = list(seen)
         user_emails = set(
             User.objects.annotate(_email_lc=Lower("email"))
             .filter(_email_lc__in=emails, is_active=True)
@@ -3617,6 +3607,19 @@ class RequestSignatureSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 f"Signers must be active company users. Unknown emails: {', '.join(unknown)}"
             )
+
+    def validate_signers(self, value):
+        seen = set()
+        for signer in value:
+            email = signer["email"].lower()
+            if email in seen:
+                raise serializers.ValidationError(
+                    "Duplicate signer emails are not allowed."
+                )
+            seen.add(email)
+            signer["email"] = email
+
+        self._validate_signer_emails(list(seen))
         return value
 
 
@@ -3961,35 +3964,11 @@ class PeerSessionListSerializer(serializers.ModelSerializer):
         ]
 
 
-class PeerSessionDetailSerializer(serializers.ModelSerializer):
+class PeerSessionDetailSerializer(PeerSessionListSerializer):
     """Detailed serializer for single peer session view."""
 
-    employee_id = serializers.IntegerField(source="employee.id", read_only=True)
-    employee_name = serializers.CharField(
-        source="employee.user.get_full_name", read_only=True
-    )
-
-    class Meta:
-        model = PeerSession
-        fields = [
-            "id",
-            "employee_id",
-            "employee_name",
-            "topic",
-            "session_date",
-            "duration_minutes",
-            "incentive_id",
-            "description",
-            "created_at",
-            "updated_at",
-        ]
-        read_only_fields = [
-            "id",
-            "employee_id",
-            "employee_name",
-            "created_at",
-            "updated_at",
-        ]
+    class Meta(PeerSessionListSerializer.Meta):
+        pass
 
 
 class PeerSessionCreateUpdateSerializer(serializers.ModelSerializer):
@@ -4929,6 +4908,20 @@ class LeaveAvailabilityResponseSerializer(serializers.Serializer):
     daily = LeaveAvailabilityDayCountSerializer(many=True)
 
 
+def _get_created_by_name(obj) -> str | None:
+    """Return the display name of the user who created *obj*."""
+    if not obj.created_by:
+        return None
+    return obj.created_by.get_full_name() or obj.created_by.username
+
+
+def _set_created_by_from_request(validated_data, context):
+    """Inject the request user as created_by if authenticated."""
+    request = context.get("request")
+    if request and request.user.is_authenticated:
+        validated_data.setdefault("created_by", request.user)
+
+
 class BonusRecordSerializer(serializers.ModelSerializer):
     employee_name = serializers.SerializerMethodField(read_only=True)
     bonus_type_display = serializers.CharField(
@@ -4961,14 +4954,10 @@ class BonusRecordSerializer(serializers.ModelSerializer):
         )
 
     def get_created_by_name(self, obj) -> str | None:
-        if not obj.created_by:
-            return None
-        return obj.created_by.get_full_name() or obj.created_by.username
+        return _get_created_by_name(obj)
 
     def create(self, validated_data):
-        request = self.context.get("request")
-        if request and request.user.is_authenticated:
-            validated_data.setdefault("created_by", request.user)
+        _set_created_by_from_request(validated_data, self.context)
         return super().create(validated_data)
 
 
@@ -4994,9 +4983,7 @@ class CompensationPolicySerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "created_by", "created_at", "updated_at"]
 
     def get_created_by_name(self, obj) -> str | None:
-        if not obj.created_by:
-            return None
-        return obj.created_by.get_full_name() or obj.created_by.username
+        return _get_created_by_name(obj)
 
     def get_employees_count(self, obj) -> int:
         count = getattr(obj, "_employees_count", None)
@@ -5015,9 +5002,7 @@ class CompensationPolicySerializer(serializers.ModelSerializer):
         return value
 
     def create(self, validated_data):
-        request = self.context.get("request")
-        if request and request.user.is_authenticated:
-            validated_data.setdefault("created_by", request.user)
+        _set_created_by_from_request(validated_data, self.context)
         return super().create(validated_data)
 
 
@@ -5048,14 +5033,10 @@ class BenefitCatalogSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "created_by", "created_at", "updated_at"]
 
     def get_created_by_name(self, obj) -> str | None:
-        if not obj.created_by:
-            return None
-        return obj.created_by.get_full_name() or obj.created_by.username
+        return _get_created_by_name(obj)
 
     def create(self, validated_data):
-        request = self.context.get("request")
-        if request and request.user.is_authenticated:
-            validated_data.setdefault("created_by", request.user)
+        _set_created_by_from_request(validated_data, self.context)
         return super().create(validated_data)
 
 
