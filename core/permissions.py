@@ -41,12 +41,39 @@ def _get_user_profile(user):
         return None
 
 
+def _is_staff_or_superuser(user) -> bool:
+    return getattr(user, "is_staff", False) or getattr(user, "is_superuser", False)
+
+
+def _is_authenticated(user) -> bool:
+    return bool(getattr(user, "is_authenticated", False))
+
+
+def _is_hr_admin(user) -> bool:
+    """Check if user has HR admin permissions on Employee Profiles module."""
+    if _is_staff_or_superuser(user):
+        return True
+    profile = _get_user_profile(user)
+    if profile is None:
+        return False
+    for action in ("view_all_profiles", "add_remove_employees"):
+        try:
+            perm = Permission.objects.get(
+                module_name="Employee Profiles", feature_action=action
+            )
+        except Permission.DoesNotExist:
+            continue
+        if profile.has_permission(perm):
+            return True
+    return False
+
+
 def _has_permission(user, module_name, feature_actions):
     """Check if a user has at least one permission in a module/action set."""
-    if not getattr(user, "is_authenticated", False):
+    if not _is_authenticated(user):
         return False
 
-    if getattr(user, "is_staff", False) or getattr(user, "is_superuser", False):
+    if _is_staff_or_superuser(user):
         return True
 
     profile = _get_user_profile(user)
@@ -73,7 +100,7 @@ def has_asset_permission(user, feature_action: str) -> bool:
     Check whether `user` holds a specific `Asset Management` feature/action permission.
     Superusers and staff are always granted access.
     """
-    if getattr(user, "is_staff", False) or getattr(user, "is_superuser", False):
+    if _is_staff_or_superuser(user):
         return True
 
     profile = _get_user_profile(user)
@@ -89,7 +116,7 @@ def has_asset_permission(user, feature_action: str) -> bool:
 
 def get_asset_permissions(user) -> list[str]:
     """Return canonical asset permission keys held by the user."""
-    if getattr(user, "is_staff", False) or getattr(user, "is_superuser", False):
+    if _is_staff_or_superuser(user):
         return list(ASSET_PERMISSION_KEYS)
     return [
         permission
@@ -228,7 +255,7 @@ class IsEmployeeOrHR(permissions.BasePermission):
         if not user or not user.is_authenticated:
             return False
 
-        if getattr(user, "is_staff", False) or getattr(user, "is_superuser", False):
+        if _is_staff_or_superuser(user):
             return True
 
         return _get_user_profile(user) is not None
@@ -257,7 +284,7 @@ class IsManagerForApproval(permissions.BasePermission):
 
     def has_object_permission(self, request, view, obj):
         user = request.user
-        if getattr(user, "is_staff", False) or getattr(user, "is_superuser", False):
+        if _is_staff_or_superuser(user):
             return True
 
         manager_profile = _get_user_profile(user)
@@ -281,7 +308,7 @@ class IsHRAdminOrReadOnlyOwnProfile(permissions.BasePermission):
     """
 
     def has_permission(self, request, view):
-        if not request.user.is_authenticated:
+        if not _is_authenticated(request.user):
             return False
 
         if request.method == "POST":
@@ -299,34 +326,7 @@ class IsHRAdminOrReadOnlyOwnProfile(permissions.BasePermission):
         return False
 
     def _is_hr_admin(self, user: Any):
-        if getattr(user, "is_staff", False) or getattr(user, "is_superuser", False):
-            return True
-
-        try:
-            profile = user.profile
-        except Exception:
-            return False
-
-        has_view = False
-        has_add = False
-
-        try:
-            perm_view_all = Permission.objects.get(
-                module_name="Employee Profiles", feature_action="view_all_profiles"
-            )
-            has_view = profile.has_permission(perm_view_all)
-        except Permission.DoesNotExist:
-            pass
-
-        try:
-            perm_add_remove = Permission.objects.get(
-                module_name="Employee Profiles", feature_action="add_remove_employees"
-            )
-            has_add = profile.has_permission(perm_add_remove)
-        except Permission.DoesNotExist:
-            pass
-
-        return has_view or has_add
+        return _is_hr_admin(user)
 
 
 def has_review_permission(user, feature_action):
@@ -480,7 +480,7 @@ class IsReviewViewer(permissions.BasePermission):
 
     def has_permission(self, request, view):
         user = request.user
-        if not user or not user.is_authenticated:
+        if not _is_authenticated(user):
             return False
         if _is_review_hr_admin(user):
             return True
@@ -511,9 +511,9 @@ def can_view_training_budget(user, budget) -> bool:
     An employee can always view their own row; team/dept/all scopes are gated
     by the corresponding Training.* permissions.
     """
-    if not getattr(user, "is_authenticated", False):
+    if not _is_authenticated(user):
         return False
-    if getattr(user, "is_staff", False) or getattr(user, "is_superuser", False):
+    if _is_staff_or_superuser(user):
         return True
 
     profile = _get_user_profile(user)
@@ -545,10 +545,10 @@ class IsTrainingBudgetEditor(permissions.BasePermission):
 
     def has_permission(self, request, view):
         user = request.user
-        if not getattr(user, "is_authenticated", False):
+        if not _is_authenticated(user):
             return False
         if request.method in permissions.SAFE_METHODS:
-            if getattr(user, "is_staff", False) or getattr(user, "is_superuser", False):
+            if _is_staff_or_superuser(user):
                 return True
             return _get_user_profile(user) is not None
         return _has_permission(user, "Training", ["configure_budget"])
@@ -583,7 +583,7 @@ def can_manage_cpf_level_changes(user) -> bool:
 def can_view_announcements(user) -> bool:
     if not getattr(user, "is_authenticated", False):
         return False
-    if getattr(user, "is_staff", False) or getattr(user, "is_superuser", False):
+    if _is_staff_or_superuser(user):
         return True
     return _get_user_profile(user) is not None
 
@@ -670,7 +670,7 @@ class IsHrOrAdmin(permissions.BasePermission):
         from .services.document_service import is_hr_or_admin
 
         user = request.user
-        if not user or not user.is_authenticated:
+        if not _is_authenticated(user):
             return False
         return is_hr_or_admin(user)
 
@@ -682,7 +682,7 @@ class IsHrOrAdminOrReadOnly(permissions.BasePermission):
         from .services.document_service import is_hr_or_admin
 
         user = request.user
-        if not user or not user.is_authenticated:
+        if not _is_authenticated(user):
             return False
         if request.method in permissions.SAFE_METHODS:
             return True
@@ -699,7 +699,7 @@ class CanReviewApplication(permissions.BasePermission):
 
     def has_permission(self, request, view):
         user = request.user
-        return bool(user and user.is_authenticated)
+        return _is_authenticated(user)
 
     def has_object_permission(self, request, view, obj):
         from .services.job_application_service import can_review_application
@@ -781,7 +781,7 @@ class IsLeaveAnalyticsViewer(permissions.BasePermission):
 
     def has_permission(self, request, view):
         user = request.user
-        if not user or not user.is_authenticated:
+        if not _is_authenticated(user):
             return False
         if request.method not in permissions.SAFE_METHODS:
             return has_leave_analytics_refresh_permission(user)
@@ -795,7 +795,7 @@ class CanRefreshLeaveAnalytics(permissions.BasePermission):
 
     def has_permission(self, request, view):
         user = request.user
-        if not user or not user.is_authenticated:
+        if not _is_authenticated(user):
             return False
         return has_leave_analytics_refresh_permission(user)
 
@@ -808,28 +808,14 @@ def is_compensation_admin(user) -> bool:
     """
     if not getattr(user, "is_authenticated", False):
         return False
-    if getattr(user, "is_staff", False) or getattr(user, "is_superuser", False):
-        return True
-    profile = _get_user_profile(user)
-    if profile is None:
-        return False
-    for action in ("view_all_profiles", "add_remove_employees"):
-        try:
-            perm = Permission.objects.get(
-                module_name="Employee Profiles", feature_action=action
-            )
-        except Permission.DoesNotExist:
-            continue
-        if profile.has_permission(perm):
-            return True
-    return False
+    return _is_hr_admin(user)
 
 
 class IsCompensationAdminOrOwnReadOnly(permissions.BasePermission):
     """HR full access; non-HR read-only on their own bonus rows."""
 
     def has_permission(self, request, view):
-        if not request.user or not request.user.is_authenticated:
+        if not _is_authenticated(request.user):
             return False
         if is_compensation_admin(request.user):
             return True
