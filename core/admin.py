@@ -61,6 +61,22 @@ from .models import (
 )
 
 
+class BaseMappingAdmin(admin.ModelAdmin):
+    list_filter = ("is_active",)
+
+
+class BaseConnectionAdmin(admin.ModelAdmin):
+    readonly_fields = (
+        "api_token_encrypted",
+        "last_test_status",
+        "last_test_message",
+        "last_test_at",
+        "last_test_metadata",
+        "created_at",
+        "updated_at",
+    )
+
+
 @admin.register(Role)
 class RoleAdmin(admin.ModelAdmin):
     list_display = ("name", "description")
@@ -228,7 +244,7 @@ class TimeImportBatchAdmin(admin.ModelAdmin):
 
 
 @admin.register(JiraConnection)
-class JiraConnectionAdmin(admin.ModelAdmin):
+class JiraConnectionAdmin(BaseConnectionAdmin):
     list_display = (
         "base_url",
         "auth_email",
@@ -236,50 +252,29 @@ class JiraConnectionAdmin(admin.ModelAdmin):
         "last_test_status",
         "last_test_at",
     )
-    readonly_fields = (
-        "api_token_encrypted",
-        "last_test_status",
-        "last_test_message",
-        "last_test_at",
-        "last_test_metadata",
-        "created_at",
-        "updated_at",
-    )
 
 
 @admin.register(JiraUserMapping)
-class JiraUserMappingAdmin(admin.ModelAdmin):
+class JiraUserMappingAdmin(BaseMappingAdmin):
     list_display = ("jira_account_id", "jira_display_name", "employee", "is_active")
-    list_filter = ("is_active",)
     search_fields = ("jira_account_id", "jira_display_name", "employee__full_name")
 
 
 @admin.register(JiraProjectMapping)
-class JiraProjectMappingAdmin(admin.ModelAdmin):
+class JiraProjectMappingAdmin(BaseMappingAdmin):
     list_display = ("jira_project_key", "jira_project_name", "project", "is_active")
-    list_filter = ("is_active",)
     search_fields = ("jira_project_key", "jira_project_name", "project__name")
 
 
 @admin.register(JiraIssueMapping)
-class JiraIssueMappingAdmin(admin.ModelAdmin):
+class JiraIssueMappingAdmin(BaseMappingAdmin):
     list_display = ("jira_issue_key", "jira_issue_id", "task", "is_active")
-    list_filter = ("is_active",)
     search_fields = ("jira_issue_key", "jira_issue_id", "task__name")
 
 
 @admin.register(TempoConnection)
-class TempoConnectionAdmin(admin.ModelAdmin):
+class TempoConnectionAdmin(BaseConnectionAdmin):
     list_display = ("base_url", "enabled", "last_test_status", "last_test_at")
-    readonly_fields = (
-        "api_token_encrypted",
-        "last_test_status",
-        "last_test_message",
-        "last_test_at",
-        "last_test_metadata",
-        "created_at",
-        "updated_at",
-    )
 
 
 @admin.register(TempoAbsenceSyncSettings)
@@ -311,30 +306,26 @@ class TempoAbsenceSyncAdmin(admin.ModelAdmin):
 
 
 @admin.register(TempoUserMapping)
-class TempoUserMappingAdmin(admin.ModelAdmin):
+class TempoUserMappingAdmin(BaseMappingAdmin):
     list_display = ("tempo_user_id", "tempo_display_name", "employee", "is_active")
-    list_filter = ("is_active",)
     search_fields = ("tempo_user_id", "tempo_display_name", "employee__full_name")
 
 
 @admin.register(TempoAccountMapping)
-class TempoAccountMappingAdmin(admin.ModelAdmin):
+class TempoAccountMappingAdmin(BaseMappingAdmin):
     list_display = ("tempo_account_id", "tempo_account_key", "project", "is_active")
-    list_filter = ("is_active",)
     search_fields = ("tempo_account_id", "tempo_account_key", "project__name")
 
 
 @admin.register(TempoProjectMapping)
-class TempoProjectMappingAdmin(admin.ModelAdmin):
+class TempoProjectMappingAdmin(BaseMappingAdmin):
     list_display = ("tempo_project_id", "tempo_project_key", "project", "is_active")
-    list_filter = ("is_active",)
     search_fields = ("tempo_project_id", "tempo_project_key", "project__name")
 
 
 @admin.register(TempoTeamMapping)
-class TempoTeamMappingAdmin(admin.ModelAdmin):
+class TempoTeamMappingAdmin(BaseMappingAdmin):
     list_display = ("tempo_team_id", "tempo_team_name", "project", "is_active")
-    list_filter = ("is_active",)
     search_fields = ("tempo_team_id", "tempo_team_name", "project__name")
 
 
