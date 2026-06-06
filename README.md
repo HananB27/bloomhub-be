@@ -820,3 +820,14 @@ All endpoints require JWT/session authentication.
   **HTTP 401** with `code = "tempo_reauth_required"`, signalling the FE to prompt the
   user to reconnect.
 - OAuth `state` is single-use, scoped to the requesting user, expires after 10 minutes.
+
+<!-- gardener-maintenance-note: 5546f108-6a48-44de-b5ae-1f2362de84d3 -->
+## Gardener Maintenance Note
+
+- Plan: `5546f108-6a48-44de-b5ae-1f2362de84d3`
+- Confidence: `0.95` / threshold `0.90`
+- Goal: Verify autonomous docs authoring end-to-end.
+- Evidence: Manual E05-T03 verification.
+- Entropy impact: Negligible (docs note).
+- Verification: Review the PR; do not merge.
+<!-- /gardener-maintenance-note -->
