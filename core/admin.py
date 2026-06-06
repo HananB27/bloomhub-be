@@ -555,20 +555,6 @@ class LeaveRequestAdmin(admin.ModelAdmin):
     )
 
 
-class LeaveAdjustmentInline(admin.TabularInline):
-    model = LeaveAdjustment
-    extra = 0
-    readonly_fields = ("adjusted_at",)
-    fields = (
-        "leave_type",
-        "old_allocated",
-        "new_allocated",
-        "reason",
-        "adjusted_by",
-        "adjusted_at",
-    )
-
-
 @admin.register(LeaveAdjustment)
 class LeaveAdjustmentAdmin(admin.ModelAdmin):
     list_display = (
