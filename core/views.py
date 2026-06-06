@@ -485,6 +485,20 @@ from .utils import (
 )
 
 
+def _build_token_response(user, status_code):
+    """Create a token response with refresh, access, and user data."""
+    from django.contrib.auth.models import update_last_login
+
+    update_last_login(None, user)
+    refresh = RefreshToken.for_user(user)
+    token_data = {
+        "refresh": str(refresh),
+        "access": str(refresh.access_token),
+        "user": UserSerializer(user).data,
+    }
+    return Response(token_data, status=status_code)
+
+
 @extend_schema(
     tags=["API Root"],
     responses={200: APIRootResponseSerializer},
@@ -544,16 +558,7 @@ class RegisterView(APIView):
         if serializer.is_valid():
             user = serializer.save()
             assert user is not None
-            from django.contrib.auth.models import update_last_login
-
-            update_last_login(None, user)
-            refresh = RefreshToken.for_user(cast(User, user))
-            token_data = {
-                "refresh": str(refresh),
-                "access": str(refresh.access_token),
-                "user": UserSerializer(user).data,
-            }
-            return Response(token_data, status=status.HTTP_201_CREATED)
+            return _build_token_response(user, status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -570,37 +575,24 @@ class LoginView(APIView):
         serializer = LoginSerializer(data=request.data)
         if serializer.is_valid():
             data = cast(dict[str, Any], serializer.validated_data)
-            try:
-                users = User.objects.filter(email=data["email"])
-                if users.count() != 1:
-                    return Response(
-                        {"error": "Invalid credentials"},
-                        status=status.HTTP_401_UNAUTHORIZED,
-                    )
-                user = users.first()
-                # Verify user has a profile in core_userprofile
-                if not hasattr(user, "profile") or user.profile is None:
-                    return Response(
-                        {
-                            "error": "User profile not found. Please contact administrator."
-                        },
-                        status=status.HTTP_401_UNAUTHORIZED,
-                    )
-                user = authenticate(username=user.username, password=data["password"])
-            except User.DoesNotExist:
-                user = None
-
+            users = User.objects.filter(email=data["email"])
+            if users.count() != 1:
+                return Response(
+                    {"error": "Invalid credentials"},
+                    status=status.HTTP_401_UNAUTHORIZED,
+                )
+            user = users.first()
+            # Verify user has a profile in core_userprofile
+            if not hasattr(user, "profile") or user.profile is None:
+                return Response(
+                    {
+                        "error": "User profile not found. Please contact administrator."
+                    },
+                    status=status.HTTP_401_UNAUTHORIZED,
+                )
+            user = authenticate(username=user.username, password=data["password"])
             if user:
-                from django.contrib.auth.models import update_last_login
-
-                update_last_login(None, user)
-                refresh = RefreshToken.for_user(cast(User, user))
-                token_data = {
-                    "refresh": str(refresh),
-                    "access": str(refresh.access_token),
-                    "user": UserSerializer(user).data,
-                }
-                return Response(token_data, status=status.HTTP_200_OK)
+                return _build_token_response(user, status.HTTP_200_OK)
             return Response(
                 {"error": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED
             )
@@ -665,16 +657,7 @@ class GoogleExchangeView(APIView):
                     update_fields.append("avatar")
                 profile.save(update_fields=update_fields)
 
-            from django.contrib.auth.models import update_last_login
-
-            update_last_login(None, user)
-            refresh = RefreshToken.for_user(cast(User, user))
-            token_data = {
-                "refresh": str(refresh),
-                "access": str(refresh.access_token),
-                "user": UserSerializer(user).data,
-            }
-            return Response(token_data, status=status.HTTP_200_OK)
+            return _build_token_response(user, status.HTTP_200_OK)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -875,78 +858,8 @@ class UploadRolePermissionsView(APIView):
         )
 
         try:
-            # Process the CSV
-            csv_file.seek(0)  # Reset file pointer
-            file_content = csv_file.read().decode("utf-8")
-            reader = csv.DictReader(io.StringIO(file_content))
-
-            roles_operations = {}
-            for row in reader:
-                role_id = row.get("role_id")
-                module_name = row.get("module_name")
-                feature_action = row.get("feature_action")
-                permission_str = row.get("permission")
-                operation_type = row.get("operation_type", "override").lower()
-
-                if (
-                    not role_id
-                    or not module_name
-                    or not feature_action
-                    or not permission_str
-                ):
-                    continue
-
-                # Get or create permission
-                permission, _ = Permission.objects.get_or_create(
-                    module_name=module_name, feature_action=feature_action
-                )
-
-                # Get or create role
-                role, _ = Role.objects.get_or_create(
-                    name=role_id, defaults={"description": f"Role {role_id}"}
-                )
-
-                # Initialize operations for role
-                if role_id not in roles_operations:
-                    roles_operations[role_id] = {
-                        "override": set(),
-                        "add": set(),
-                        "remove": set(),
-                        "merge": {},
-                    }
-
-                ops = roles_operations[role_id]
-                desired = permission_str.upper() == "YES"
-
-                if operation_type == "override" and desired:
-                    ops["override"].add(permission)
-                elif operation_type == "add" and desired:
-                    ops["add"].add(permission)
-                elif operation_type == "remove" and desired:
-                    ops["remove"].add(permission)
-                elif operation_type == "merge":
-                    ops["merge"][permission] = desired
-
-            # Now apply operations to roles
-            for role_id, ops in roles_operations.items():
-                role = Role.objects.get(name=role_id)
-
-                if ops["override"]:
-                    role.permissions.set(ops["override"])
-                else:
-                    if ops["add"]:
-                        role.permissions.add(*ops["add"])
-                    if ops["remove"]:
-                        role.permissions.remove(*ops["remove"])
-                    if ops["merge"]:
-                        current = set(role.permissions.all())
-                        for perm, desired in ops["merge"].items():
-                            if desired:
-                                current.add(perm)
-                            else:
-                                current.discard(perm)
-                        role.permissions.set(current)
-
+            roles_operations = self._parse_role_permissions_csv(csv_file)
+            self._apply_role_operations(roles_operations)
             return Response(
                 {
                     "message": "Role permissions uploaded and processed successfully",
@@ -954,9 +867,81 @@ class UploadRolePermissionsView(APIView):
                 },
                 status=status.HTTP_200_OK,
             )
-
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    def _parse_role_permissions_csv(self, csv_file):
+        """Parse CSV file and return roles_operations dict."""
+        csv_file.seek(0)
+        file_content = csv_file.read().decode("utf-8")
+        reader = csv.DictReader(io.StringIO(file_content))
+
+        roles_operations = {}
+        for row in reader:
+            role_id = row.get("role_id")
+            module_name = row.get("module_name")
+            feature_action = row.get("feature_action")
+            permission_str = row.get("permission")
+            operation_type = row.get("operation_type", "override").lower()
+
+            if (
+                not role_id
+                or not module_name
+                or not feature_action
+                or not permission_str
+            ):
+                continue
+
+            permission, _ = Permission.objects.get_or_create(
+                module_name=module_name, feature_action=feature_action
+            )
+
+            role, _ = Role.objects.get_or_create(
+                name=role_id, defaults={"description": f"Role {role_id}"}
+            )
+
+            if role_id not in roles_operations:
+                roles_operations[role_id] = {
+                    "override": set(),
+                    "add": set(),
+                    "remove": set(),
+                    "merge": {},
+                }
+
+            ops = roles_operations[role_id]
+            desired = permission_str.upper() == "YES"
+
+            if operation_type == "override" and desired:
+                ops["override"].add(permission)
+            elif operation_type == "add" and desired:
+                ops["add"].add(permission)
+            elif operation_type == "remove" and desired:
+                ops["remove"].add(permission)
+            elif operation_type == "merge":
+                ops["merge"][permission] = desired
+
+        return roles_operations
+
+    def _apply_role_operations(self, roles_operations):
+        """Apply parsed operations to roles."""
+        for role_id, ops in roles_operations.items():
+            role = Role.objects.get(name=role_id)
+
+            if ops["override"]:
+                role.permissions.set(ops["override"])
+            else:
+                if ops["add"]:
+                    role.permissions.add(*ops["add"])
+                if ops["remove"]:
+                    role.permissions.remove(*ops["remove"])
+                if ops["merge"]:
+                    current = set(role.permissions.all())
+                    for perm, desired in ops["merge"].items():
+                        if desired:
+                            current.add(perm)
+                        else:
+                            current.discard(perm)
+                    role.permissions.set(current)
 
 
 _EMPLOYEE_LIST_PARAMETERS = [
@@ -1466,7 +1451,7 @@ class EmployeeProfileViewSet(viewsets.ModelViewSet):
         perm = IsHRAdminOrReadOnlyOwnProfile()
         if perm._is_hr_admin(user):
             return True
-        return getattr(profile, "user_id", None) == getattr(user, "id", None)
+        return profile.user_id == user.id
 
     def _create_file_cv(self, request, profile: UserProfile):
         cv_file = request.FILES.get("file")
@@ -1921,11 +1906,7 @@ class ProjectDetailView(APIView):
 class ProjectArchiveView(APIView):
     permission_classes = [IsAuthenticated]
 
-    @extend_schema(
-        request=None,
-        responses={200: ProjectDetailSerializer, 403: None, 404: None},
-    )
-    def post(self, request, pk):
+    def _perform_action(self, request, pk, action, action_name):
         project = Project.objects.filter(pk=pk).first()
         if project is None:
             return Response(
@@ -1933,25 +1914,28 @@ class ProjectArchiveView(APIView):
             )
         if not can_modify_projects(request.user):
             return Response(
-                {"error": "You do not have permission to archive projects."},
+                {"error": f"You do not have permission to {action_name} projects."},
                 status=status.HTTP_403_FORBIDDEN,
             )
-        archive_project(project)
+        action(project)
         annotated = annotate_assignment_counts(
             Project.objects.filter(pk=project.pk)
         ).first()
         return Response(ProjectDetailSerializer(annotated).data)
+
+    @extend_schema(
+        request=None,
+        responses={200: ProjectDetailSerializer, 403: None, 404: None},
+    )
+    def post(self, request, pk):
+        return self._perform_action(request, pk, archive_project, "archive")
 
 
 @extend_schema(tags=["projects"])
 class ProjectReactivateView(APIView):
     permission_classes = [IsAuthenticated]
 
-    @extend_schema(
-        request=None,
-        responses={200: ProjectDetailSerializer, 403: None, 404: None},
-    )
-    def post(self, request, pk):
+    def _perform_action(self, request, pk, action, action_name):
         project = Project.objects.filter(pk=pk).first()
         if project is None:
             return Response(
@@ -1959,14 +1943,21 @@ class ProjectReactivateView(APIView):
             )
         if not can_modify_projects(request.user):
             return Response(
-                {"error": "You do not have permission to reactivate projects."},
+                {"error": f"You do not have permission to {action_name} projects."},
                 status=status.HTTP_403_FORBIDDEN,
             )
-        reactivate_project(project)
+        action(project)
         annotated = annotate_assignment_counts(
             Project.objects.filter(pk=project.pk)
         ).first()
         return Response(ProjectDetailSerializer(annotated).data)
+
+    @extend_schema(
+        request=None,
+        responses={200: ProjectDetailSerializer, 403: None, 404: None},
+    )
+    def post(self, request, pk):
+        return self._perform_action(request, pk, reactivate_project, "reactivate")
 
 
 @extend_schema(tags=["projects"])
@@ -1981,6 +1972,40 @@ class ProjectActivityView(APIView):
     """
 
     permission_classes = [IsAuthenticated]
+
+    def _collect_assignment_events(self, assignments):
+        events = []
+        for a in assignments:
+            who = (
+                a.user_profile.full_name or a.user_profile.user.username
+                if a.user_profile
+                else "Unknown"
+            )
+            role_part = f" as {a.role}" if a.role else ""
+            events.append(
+                {
+                    "id": f"a-{a.id}-created",
+                    "at": a.created_at.isoformat(),
+                    "actor": "—",
+                    "message": (
+                        f"Assigned {who}{role_part} at {a.allocation_percentage}%"
+                    ),
+                }
+            )
+            if (
+                a.end_date
+                and a.updated_at
+                and (a.updated_at - a.created_at).total_seconds() > 1
+            ):
+                events.append(
+                    {
+                        "id": f"a-{a.id}-ended",
+                        "at": a.updated_at.isoformat(),
+                        "actor": "—",
+                        "message": (f"Ended assignment for {who} on {a.end_date}"),
+                    }
+                )
+        return events
 
     @extend_schema(responses={200: None, 403: None, 404: None})
     def get(self, request, pk):
@@ -2033,36 +2058,7 @@ class ProjectActivityView(APIView):
             .filter(project=project)
             .order_by("-created_at")
         )
-        for a in assignments:
-            who = (
-                a.user_profile.full_name or a.user_profile.user.username
-                if a.user_profile
-                else "Unknown"
-            )
-            role_part = f" as {a.role}" if a.role else ""
-            events.append(
-                {
-                    "id": f"a-{a.id}-created",
-                    "at": a.created_at.isoformat(),
-                    "actor": "—",
-                    "message": (
-                        f"Assigned {who}{role_part} at {a.allocation_percentage}%"
-                    ),
-                }
-            )
-            if (
-                a.end_date
-                and a.updated_at
-                and (a.updated_at - a.created_at).total_seconds() > 1
-            ):
-                events.append(
-                    {
-                        "id": f"a-{a.id}-ended",
-                        "at": a.updated_at.isoformat(),
-                        "actor": "—",
-                        "message": (f"Ended assignment for {who} on {a.end_date}"),
-                    }
-                )
+        events.extend(self._collect_assignment_events(assignments))
 
         events.sort(key=lambda e: e["at"], reverse=True)
         return Response({"events": events})
@@ -2799,10 +2795,8 @@ class AssetExportView(APIView):
         return response
 
     def _serialize_asset_field(self, asset, field_name):
-        if field_name == "is_under_warranty":
-            value = asset.is_under_warranty
-        elif field_name == "is_available":
-            value = asset.is_available
+        if field_name in ("is_under_warranty", "is_available"):
+            value = getattr(asset, field_name)
         else:
             value = getattr(asset, field_name, None)
 
@@ -3827,6 +3821,20 @@ class ScheduledMaintenanceDetailView(APIView):
 class ScheduledMaintenanceCompleteView(APIView):
     permission_classes = [IsAuthenticated]
 
+    def _apply_asset_updates(self, schedule, data):
+        """Update asset fields from completion data if provided."""
+        update_fields = []
+        status_after = data.get("asset_status_after")
+        if status_after:
+            schedule.asset.status = status_after
+            update_fields.append("status")
+        condition_after = data.get("asset_condition_after")
+        if condition_after:
+            schedule.asset.condition = condition_after
+            update_fields.append("condition")
+        if update_fields:
+            schedule.asset.save(update_fields=update_fields)
+
     @extend_schema(
         tags=["Asset Management"],
         request=ScheduledMaintenanceCompleteSerializer,
@@ -3888,17 +3896,7 @@ class ScheduledMaintenanceCompleteView(APIView):
                 cost=data.get("cost"),
                 replaced_by=request.user.profile,
             )
-            asset_update_fields = []
-            asset_status_after = data.get("asset_status_after")
-            if asset_status_after:
-                schedule.asset.status = asset_status_after
-                asset_update_fields.append("status")
-            asset_condition_after = data.get("asset_condition_after")
-            if asset_condition_after:
-                schedule.asset.condition = asset_condition_after
-                asset_update_fields.append("condition")
-            if asset_update_fields:
-                schedule.asset.save(update_fields=asset_update_fields)
+            self._apply_asset_updates(schedule, data)
 
             schedule.status = ScheduledMaintenance.Status.COMPLETED
             schedule.completed_log = replacement_log
@@ -4208,6 +4206,12 @@ class ChecklistInstanceViewSet(
                 status=status.HTTP_403_FORBIDDEN,
             )
         return profile, None
+
+    def _validate_no_duplicate_instance(self, employee, template):
+        duplicate_error = self._validate_no_duplicate_instance(employee, template)
+        if duplicate_error:
+            return duplicate_error
+        return None
 
     @extend_schema(
         summary="Assign a checklist template to an employee",
@@ -4857,9 +4861,12 @@ class PerformanceReviewViewSet(viewsets.ModelViewSet):
     def _get_review_for_nested_read(self, pk):
         """Fetch a review through the scoped queryset without object permission checks."""
         try:
-            return self.get_queryset().get(pk=pk)
+            return self.get_queryset().get(pk=pk), None
         except PerformanceReview.DoesNotExist:
-            return None
+            return None, Response(
+                {"error": "Performance review not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
 
     def _visible_review_notes(self, review):
         notes = review.notes.select_related("author__user", "edited_by__user")
@@ -5058,12 +5065,9 @@ class PerformanceReviewViewSet(viewsets.ModelViewSet):
     )
     @action(detail=True, methods=["get", "post"], url_path="notes")
     def notes(self, request, pk=None):
-        review = self._get_review_for_nested_read(pk)
-        if review is None:
-            return Response(
-                {"error": "Performance review not found."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+        review, err = self._get_review_for_nested_read(pk)
+        if err:
+            return err
 
         if request.method == "GET":
             serializer = PerformanceReviewNoteSerializer(
@@ -5157,12 +5161,9 @@ class PerformanceReviewViewSet(viewsets.ModelViewSet):
     )
     @action(detail=True, methods=["get", "post"], url_path="action-points")
     def action_points(self, request, pk=None):
-        review = self._get_review_for_nested_read(pk)
-        if review is None:
-            return Response(
-                {"error": "Performance review not found."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+        review, err = self._get_review_for_nested_read(pk)
+        if err:
+            return err
 
         if request.method == "GET":
             serializer = PerformanceReviewActionPointSerializer(
@@ -5258,12 +5259,9 @@ class PerformanceReviewViewSet(viewsets.ModelViewSet):
         parser_classes=[parsers.MultiPartParser, parsers.FormParser],
     )
     def attachments(self, request, pk=None):
-        review = self._get_review_for_nested_read(pk)
-        if review is None:
-            return Response(
-                {"error": "Performance review not found."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+        review, err = self._get_review_for_nested_read(pk)
+        if err:
+            return err
 
         if request.method == "GET":
             serializer = PerformanceReviewAttachmentSerializer(
@@ -5458,8 +5456,14 @@ class DocumentViewSet(viewsets.GenericViewSet):
         include_archived = request.query_params.get("archived", "").lower() == "true"
         return document_queryset(include_archived=include_archived)
 
-    def _get_document_or_404(self, pk):
-        return get_document_for_api(pk)
+    def _get_document(self, pk):
+        document = get_document_for_api(pk)
+        if document is None:
+            return None, Response(
+                {"detail": "Document not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return document, None
 
     def _apply_filters(self, queryset, request):
         try:
@@ -5567,11 +5571,9 @@ class DocumentViewSet(viewsets.GenericViewSet):
         summary="Get a single document", responses={200: DocumentListSerializer}
     )
     def retrieve(self, request, pk=None):
-        document = self._get_document_or_404(pk)
-        if not document:
-            return Response(
-                {"detail": "Document not found."}, status=status.HTTP_404_NOT_FOUND
-            )
+        document, err = self._get_document(pk)
+        if err:
+            return err
         if not is_document_accessible(request.user, document):
             return Response(
                 {"detail": "You do not have permission to access this document."},
@@ -5585,17 +5587,13 @@ class DocumentViewSet(viewsets.GenericViewSet):
 
     @extend_schema(summary="Delete a document (HR/admin only)", responses={204: None})
     def destroy(self, request, pk=None):
-        if not is_hr_or_admin(request.user):
-            return Response(
-                {"detail": "Only HR or admin users can delete documents."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+        err = self._require_hr_admin(request, "delete documents")
+        if err:
+            return err
 
-        document = self._get_document_or_404(pk)
-        if not document:
-            return Response(
-                {"detail": "Document not found."}, status=status.HTTP_404_NOT_FOUND
-            )
+        document, err = self._get_document(pk)
+        if err:
+            return err
 
         hard_delete_document(document)
         return Response(status=status.HTTP_204_NO_CONTENT)
@@ -5610,11 +5608,9 @@ class DocumentViewSet(viewsets.GenericViewSet):
     )
     @action(detail=True, methods=["get"], url_path="download")
     def download(self, request, pk=None):
-        document = self._get_document_or_404(pk)
-        if not document:
-            return Response(
-                {"detail": "Document not found."}, status=status.HTTP_404_NOT_FOUND
-            )
+        document, err = self._get_document(pk)
+        if err:
+            return err
         if not is_document_accessible(request.user, document):
             return Response(
                 {"detail": "You do not have permission to access this document."},
@@ -5634,11 +5630,9 @@ class DocumentViewSet(viewsets.GenericViewSet):
     )
     @action(detail=True, methods=["get"], url_path="preview")
     def preview(self, request, pk=None):
-        document = self._get_document_or_404(pk)
-        if not document:
-            return Response(
-                {"detail": "Document not found."}, status=status.HTTP_404_NOT_FOUND
-            )
+        document, err = self._get_document(pk)
+        if err:
+            return err
         if not is_document_accessible(request.user, document):
             return Response(
                 {"detail": "You do not have permission to access this document."},
@@ -5661,17 +5655,13 @@ class DocumentViewSet(viewsets.GenericViewSet):
     )
     @action(detail=True, methods=["post"], url_path="archive")
     def archive(self, request, pk=None):
-        if not is_hr_or_admin(request.user):
-            return Response(
-                {"detail": "Only HR or admin users can archive documents."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+        err = self._require_hr_admin(request, "archive documents")
+        if err:
+            return err
 
-        document = self._get_document_or_404(pk)
-        if not document:
-            return Response(
-                {"detail": "Document not found."}, status=status.HTTP_404_NOT_FOUND
-            )
+        document, err = self._get_document(pk)
+        if err:
+            return err
 
         document = archive_document(document)
         return Response(
@@ -5684,17 +5674,13 @@ class DocumentViewSet(viewsets.GenericViewSet):
     )
     @action(detail=True, methods=["post"], url_path="unarchive")
     def unarchive(self, request, pk=None):
-        if not is_hr_or_admin(request.user):
-            return Response(
-                {"detail": "Only HR or admin users can restore archived documents."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+        err = self._require_hr_admin(request, "restore archived documents")
+        if err:
+            return err
 
-        document = self._get_document_or_404(pk)
-        if not document:
-            return Response(
-                {"detail": "Document not found."}, status=status.HTTP_404_NOT_FOUND
-            )
+        document, err = self._get_document(pk)
+        if err:
+            return err
 
         document = unarchive_document(document)
         return Response(
@@ -5708,17 +5694,13 @@ class DocumentViewSet(viewsets.GenericViewSet):
     )
     @action(detail=True, methods=["patch"], url_path="visibility")
     def update_visibility(self, request, pk=None):
-        if not is_hr_or_admin(request.user):
-            return Response(
-                {"detail": "Only HR or admin users can update document visibility."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+        err = self._require_hr_admin(request, "update document visibility")
+        if err:
+            return err
 
-        document = self._get_document_or_404(pk)
-        if not document:
-            return Response(
-                {"detail": "Document not found."}, status=status.HTTP_404_NOT_FOUND
-            )
+        document, err = self._get_document(pk)
+        if err:
+            return err
 
         serializer = DocumentVisibilityUpdateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -5749,11 +5731,9 @@ class DocumentViewSet(viewsets.GenericViewSet):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        document = self._get_document_or_404(pk)
-        if not document:
-            return Response(
-                {"detail": "Document not found."}, status=status.HTTP_404_NOT_FOUND
-            )
+        document, err = self._get_document(pk)
+        if err:
+            return err
         if not is_document_accessible(request.user, document):
             return Response(
                 {"detail": "You do not have permission to access this document."},
@@ -5791,11 +5771,9 @@ class DocumentViewSet(viewsets.GenericViewSet):
     )
     @action(detail=True, methods=["post"], url_path="sign")
     def sign(self, request, pk=None):
-        document = self._get_document_or_404(pk)
-        if not document:
-            return Response(
-                {"detail": "Document not found."}, status=status.HTTP_404_NOT_FOUND
-            )
+        document, err = self._get_document(pk)
+        if err:
+            return err
         if not is_document_accessible(request.user, document):
             return Response(
                 {"detail": "You do not have permission to access this document."},
@@ -5851,11 +5829,9 @@ class DocumentViewSet(viewsets.GenericViewSet):
                 {"detail": "You do not have permission to reset signatures."},
                 status=status.HTTP_403_FORBIDDEN,
             )
-        document = self._get_document_or_404(pk)
-        if not document:
-            return Response(
-                {"detail": "Document not found."}, status=status.HTTP_404_NOT_FOUND
-            )
+        document, err = self._get_document(pk)
+        if err:
+            return err
         if not is_document_accessible(request.user, document):
             return Response(
                 {"detail": "You do not have permission to access this document."},
@@ -5875,11 +5851,9 @@ class DocumentViewSet(viewsets.GenericViewSet):
     @extend_schema(summary="List document signature status and audit events")
     @action(detail=True, methods=["get"], url_path="signatures")
     def signatures(self, request, pk=None):
-        document = self._get_document_or_404(pk)
-        if not document:
-            return Response(
-                {"detail": "Document not found."}, status=status.HTTP_404_NOT_FOUND
-            )
+        document, err = self._get_document(pk)
+        if err:
+            return err
         if not is_document_accessible(request.user, document):
             return Response(
                 {"detail": "You do not have permission to access this document."},
@@ -5910,11 +5884,9 @@ class DocumentViewSet(viewsets.GenericViewSet):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        document = self._get_document_or_404(pk)
-        if not document:
-            return Response(
-                {"detail": "Document not found."}, status=status.HTTP_404_NOT_FOUND
-            )
+        document, err = self._get_document(pk)
+        if err:
+            return err
         if not is_document_accessible(request.user, document):
             return Response(
                 {"detail": "You do not have permission to access this document."},
@@ -5942,11 +5914,9 @@ class DocumentViewSet(viewsets.GenericViewSet):
     )
     @action(detail=True, methods=["get"], url_path="versions")
     def versions(self, request, pk=None):
-        document = self._get_document_or_404(pk)
-        if not document:
-            return Response(
-                {"detail": "Document not found."}, status=status.HTTP_404_NOT_FOUND
-            )
+        document, err = self._get_document(pk)
+        if err:
+            return err
         if not is_document_accessible(request.user, document):
             return Response(
                 {"detail": "You do not have permission to access this document."},
@@ -5971,11 +5941,9 @@ class DocumentViewSet(viewsets.GenericViewSet):
     )
     @action(detail=False, methods=["post"], url_path="bulk-delete")
     def bulk_delete(self, request):
-        if not is_hr_or_admin(request.user):
-            return Response(
-                {"detail": "Only HR or admin users can bulk delete documents."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+        err = self._require_hr_admin(request, "bulk delete documents")
+        if err:
+            return err
 
         serializer = BulkIdsSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -5999,11 +5967,9 @@ class DocumentViewSet(viewsets.GenericViewSet):
     )
     @action(detail=False, methods=["post"], url_path="bulk-archive")
     def bulk_archive(self, request):
-        if not is_hr_or_admin(request.user):
-            return Response(
-                {"detail": "Only HR or admin users can bulk archive documents."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+        err = self._require_hr_admin(request, "bulk archive documents")
+        if err:
+            return err
 
         serializer = BulkIdsSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -6064,11 +6030,9 @@ class DocumentViewSet(viewsets.GenericViewSet):
     )
     @action(detail=False, methods=["get"], url_path="export")
     def export(self, request):
-        if not is_hr_or_admin(request.user):
-            return Response(
-                {"detail": "Only HR or admin users can export documents."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+        err = self._require_hr_admin(request, "export documents")
+        if err:
+            return err
 
         queryset = self._base_queryset(request).filter(archived=False)
         category = request.query_params.get("category")
@@ -6176,33 +6140,6 @@ def _build_budget_warning(employee, fiscal_year):
     }
 
 
-def _build_budget_warning(employee, fiscal_year):
-    """Return a warning dict when usage crosses 80% or exceeds the allocation."""
-    from decimal import Decimal
-
-    from .constants import TRAINING_BUDGET_WARNING_THRESHOLD
-
-    budget = TrainingBudget.objects.filter(
-        employee=employee, fiscal_year=fiscal_year
-    ).first()
-    if budget is None or not budget.allocated_budget:
-        return None
-
-    ratio = (budget.used_budget or Decimal("0.00")) / budget.allocated_budget
-    if ratio < TRAINING_BUDGET_WARNING_THRESHOLD:
-        return None
-
-    exceeded = budget.used_budget > budget.allocated_budget
-    return {
-        "level": "exceeded" if exceeded else "approaching_limit",
-        "fiscal_year": budget.fiscal_year,
-        "allocated_budget": str(budget.allocated_budget),
-        "used_budget": str(budget.used_budget),
-        "remaining_budget": str(budget.remaining_budget),
-        "percent_used": int(round(float(budget.budget_percentage_used))),
-    }
-
-
 @extend_schema(tags=["Training & Development"])
 class TrainingEntryViewSet(viewsets.ModelViewSet):
     """
@@ -6270,7 +6207,6 @@ class TrainingEntryViewSet(viewsets.ModelViewSet):
         # Store instance for use in create method
         self.created_instance = instance
         recalculate_budget(instance.employee, instance.training_date.year)
-        recalculate_budget(instance.employee, instance.training_date.year)
 
     def create(self, request, *args, **kwargs):
         """Override create to return response with status field."""
@@ -6278,14 +6214,6 @@ class TrainingEntryViewSet(viewsets.ModelViewSet):
         # Re-serialize the created instance with DetailSerializer to include status
         if response.status_code == 201 and hasattr(self, "created_instance"):
             detail_serializer = TrainingEntryDetailSerializer(self.created_instance)
-            data = detail_serializer.data
-            warning = _build_budget_warning(
-                self.created_instance.employee,
-                self.created_instance.training_date.year,
-            )
-            if warning is not None:
-                data["budget_warning"] = warning
-            response.data = data
             data = detail_serializer.data
             warning = _build_budget_warning(
                 self.created_instance.employee,
@@ -6330,10 +6258,7 @@ class TrainingEntryViewSet(viewsets.ModelViewSet):
         """Delete entry (employee: own only, HR: any)."""
         employee = instance.employee
         year = instance.training_date.year
-        employee = instance.employee
-        year = instance.training_date.year
         instance.delete()
-        recalculate_budget(employee, year)
         recalculate_budget(employee, year)
 
     @extend_schema(
@@ -6554,21 +6479,7 @@ class TimeEntryViewSet(viewsets.ModelViewSet):
         if getattr(user, "is_staff", False) or getattr(user, "is_superuser", False):
             queryset = base
         else:
-            profile = profile_for_user(user)
-            if profile is None:
-                return TimeEntry.objects.none()
-            scopes = Q()
-            if has_time_tracking_permission(user, "view_own_timesheet"):
-                scopes |= Q(employee=profile)
-            if has_time_tracking_permission(
-                user, "view_team_timesheets"
-            ) or has_time_tracking_permission(user, "approve_team_timesheets"):
-                scopes |= Q(employee__managers=profile)
-            if has_time_tracking_permission(user, "view_dept_timesheets"):
-                scopes |= Q()
-                queryset = base
-            else:
-                queryset = base.filter(scopes) if scopes else base.none()
+            queryset = _scoped_time_entries(user)
 
         date_from = self.request.query_params.get("date_from")
         date_to = self.request.query_params.get("date_to")
@@ -6896,6 +6807,31 @@ def _decimal(value):
 class TimeTrackingWeeklyDashboardView(APIView):
     permission_classes = [IsAuthenticated]
 
+    def _build_rows(self, employees, date_from, date_to, project_id):
+        rows = []
+        current = date_from - timedelta(days=date_from.weekday())
+        final_week = date_to - timedelta(days=date_to.weekday())
+        while current <= final_week:
+            for employee in employees:
+                summary = weekly_allocation_summary(
+                    employee=employee, week_start=current
+                )
+                for project in summary["projects"]:
+                    if project_id and str(project["project_id"]) != str(project_id):
+                        continue
+                    rows.append(
+                        {
+                            "employee_id": employee.id,
+                            "employee_name": employee.full_name
+                            or employee.user.username,
+                            "week_start": summary["week_start"],
+                            "week_end": summary["week_end"],
+                            **project,
+                        }
+                    )
+            current += timedelta(days=7)
+        return rows
+
     @extend_schema(responses={200: None, 400: None, 403: None})
     def get(self, request):
         week_start = _week_start_from_request(request)
@@ -6954,15 +6890,18 @@ class TimeTrackingWeeklyDashboardView(APIView):
 class TimeTrackingApprovalQueueView(APIView):
     permission_classes = [IsAuthenticated]
 
+    def _has_approval_permission(self, user):
+        return (
+            getattr(user, "is_staff", False)
+            or getattr(user, "is_superuser", False)
+            or has_time_tracking_permission(user, "approve_team_timesheets")
+        )
+
     @extend_schema(
         responses={200: TimeEntrySerializer(many=True), 400: None, 403: None}
     )
     def get(self, request):
-        if not (
-            getattr(request.user, "is_staff", False)
-            or getattr(request.user, "is_superuser", False)
-            or has_time_tracking_permission(request.user, "approve_team_timesheets")
-        ):
+        if not self._has_approval_permission(request.user):
             return Response(
                 {"detail": "You do not have permission to view approval queue."},
                 status=status.HTTP_403_FORBIDDEN,
@@ -7051,28 +6990,7 @@ class TimeTrackingPlannedVsActualView(APIView):
         )
         if employee_id:
             employees = employees.filter(id=employee_id)
-        rows = []
-        current = date_from - timedelta(days=date_from.weekday())
-        final_week = date_to - timedelta(days=date_to.weekday())
-        while current <= final_week:
-            for employee in employees:
-                summary = weekly_allocation_summary(
-                    employee=employee, week_start=current
-                )
-                for project in summary["projects"]:
-                    if project_id and str(project["project_id"]) != str(project_id):
-                        continue
-                    rows.append(
-                        {
-                            "employee_id": employee.id,
-                            "employee_name": employee.full_name
-                            or employee.user.username,
-                            "week_start": summary["week_start"],
-                            "week_end": summary["week_end"],
-                            **project,
-                        }
-                    )
-            current += timedelta(days=7)
+        rows = self._build_rows(employees, date_from, date_to, project_id)
         return Response(
             {
                 "date_from": date_from.isoformat(),
@@ -8029,6 +7947,35 @@ class TimeTrackingSourceChangeReviewView(APIView):
 class TimeTrackingSourceChangeResolveView(APIView):
     permission_classes = [IsAuthenticated]
 
+    def _accept_current_change(self, entry, metadata):
+        """Accept the current BloomHub value and clear the flag."""
+        metadata["source_change_flag"] = TimeEntrySourceChangeFlag.NONE
+        entry.source_metadata = metadata
+        entry.save(update_fields=["source_metadata", "updated_at"])
+        return "Accepted current BloomHub time entry value."
+
+    def _apply_source_update(self, entry, metadata):
+        """Apply the pending source update to the time entry."""
+        if entry.status == TimeEntryStatus.APPROVED:
+            raise ValueError("Approved entries cannot be changed by source review.")
+        pending = metadata.get("source_pending_update") or {}
+        if "work_date" in pending:
+            parsed_date = parse_date(pending["work_date"])
+            if parsed_date is None:
+                raise ValueError("Pending source update contains invalid work_date.")
+            entry.work_date = parsed_date
+        if "hours" in pending:
+            entry.hours = Decimal(str(pending["hours"]))
+        if "notes" in pending:
+            entry.notes = pending["notes"]
+        metadata["source_change_flag"] = TimeEntrySourceChangeFlag.NONE
+        metadata.pop("source_pending_update", None)
+        entry.source_metadata = metadata
+        entry.duplicate_fingerprint = fingerprint_for_entry(entry)
+        entry.full_clean()
+        entry.save()
+        return "Applied source update to unapproved time entry."
+
     @extend_schema(
         request=TimeSourceChangeResolveSerializer,
         responses={200: TimeEntrySerializer, 400: None, 403: None, 404: None},
@@ -8050,39 +7997,18 @@ class TimeTrackingSourceChangeResolveView(APIView):
         serializer.is_valid(raise_exception=True)
         action = serializer.validated_data["action"]
         metadata = dict(entry.source_metadata or {})
-        if action == "accept_current":
-            metadata["source_change_flag"] = TimeEntrySourceChangeFlag.NONE
-            entry.source_metadata = metadata
-            entry.save(update_fields=["source_metadata", "updated_at"])
-            message = "Accepted current BloomHub time entry value."
-        elif action == "apply_source":
-            if entry.status == TimeEntryStatus.APPROVED:
-                return Response(
-                    {"detail": "Approved entries cannot be changed by source review."},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-            pending = metadata.get("source_pending_update") or {}
-            if "work_date" in pending:
-                parsed_date = parse_date(pending["work_date"])
-                if parsed_date is None:
-                    return Response(
-                        {"detail": "Pending source update contains invalid work_date."},
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
-                entry.work_date = parsed_date
-            if "hours" in pending:
-                entry.hours = Decimal(str(pending["hours"]))
-            if "notes" in pending:
-                entry.notes = pending["notes"]
-            metadata["source_change_flag"] = TimeEntrySourceChangeFlag.NONE
-            metadata.pop("source_pending_update", None)
-            entry.source_metadata = metadata
-            entry.duplicate_fingerprint = fingerprint_for_entry(entry)
-            entry.full_clean()
-            entry.save()
-            message = "Applied source update to unapproved time entry."
-        else:
-            message = "Left source change flagged for later review."
+        try:
+            if action == "accept_current":
+                message = self._accept_current_change(entry, metadata)
+            elif action == "apply_source":
+                message = self._apply_source_update(entry, metadata)
+            else:
+                message = "Left source change flagged for later review."
+        except ValueError as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         log_time_entry_event(
             entry,
             TimeEntryAuditEventType.SOURCE_CHANGED,
@@ -8973,6 +8899,51 @@ class DocumentTemplateViewSet(viewsets.GenericViewSet):
 
     def _build_error(self, code: str, message: str, details: dict | None = None):
         return {"code": code, "message": message, "details": details or {}}
+
+    def _check_system_template(self, template):
+        """Return a 403 response if the template is a system template."""
+        from .enums import ErrorCode
+
+        if template.is_system_template:
+            return Response(
+                self._build_error(
+                    ErrorCode.SYSTEM_TEMPLATE_IMMUTABLE,
+                    "System templates cannot be modified.",
+                ),
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return None
+
+    def _check_edit_permission(self, request, template):
+        """Return a 403 response if the user cannot edit the template."""
+        from .enums import ErrorCode
+
+        if not self._can_edit(request, template):
+            return Response(
+                self._build_error(
+                    ErrorCode.FORBIDDEN,
+                    "You do not have permission to edit this template.",
+                ),
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return None
+
+    def _update_template_fields(self, template, fields_data):
+        """Replace all field definitions for the given template."""
+        template.fields.all().delete()
+        for field_data in fields_data:
+            TemplateField.objects.create(template=template, **field_data)
+
+    def _save_and_return_template(self, template):
+        """Reload and return the template with related data."""
+        result = (
+            DocumentTemplate.objects.prefetch_related("fields")
+            .select_related("created_by__user")
+            .get(pk=template.pk)
+        )
+        return Response(
+            DocumentTemplateDetailSerializer(result).data, status=status.HTTP_200_OK
+        )
 
     # ── queryset helpers ──────────────────────────────────────────────────────
 
@@ -10020,11 +9991,7 @@ class LeaveAnalyticsViewSet(
             .order_by("month", "leave_type")
         )
 
-        bucketed: dict[int, dict[str, int]] = {
-            m: {lt: 0 for lt in LeaveType.values} for m in range(1, 13)
-        }
-        for row in rows:
-            bucketed[row["month"]][row["leave_type"]] = row["total"] or 0
+        bucketed = self._build_monthly_buckets(rows, LeaveType)
 
         payload = []
         for month in range(1, 13):
@@ -10041,6 +10008,15 @@ class LeaveAnalyticsViewSet(
 
         serializer = LeaveAnalyticsMonthRowSerializer(payload, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @staticmethod
+    def _build_monthly_buckets(rows, leave_type_enum):
+        bucketed: dict[int, dict[str, int]] = {
+            m: {lt: 0 for lt in leave_type_enum.values} for m in range(1, 13)
+        }
+        for row in rows:
+            bucketed[row["month"]][row["leave_type"]] = row["total"] or 0
+        return bucketed
 
     @extend_schema(
         tags=["Leave Analytics"],
@@ -10688,6 +10664,19 @@ class BonusRecordViewSet(viewsets.ModelViewSet):
     ordering_fields = ["effective_date", "amount", "created_at"]
     ordering = ["-effective_date"]
 
+    def _apply_bonus_filters(self, qs, request):
+        """Apply query‑parameter filters from the request to the queryset."""
+        employee_id = request.query_params.get("employee_id")
+        if employee_id:
+            qs = qs.filter(user_profile_id=employee_id)
+        since = request.query_params.get("since")
+        if since:
+            qs = qs.filter(effective_date__gte=since)
+        bonus_type = request.query_params.get("bonus_type")
+        if bonus_type:
+            qs = qs.filter(bonus_type=bonus_type)
+        return qs
+
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):
             return BonusRecord.objects.none()
@@ -10696,15 +10685,7 @@ class BonusRecordViewSet(viewsets.ModelViewSet):
         if not user or not user.is_authenticated:
             return BonusRecord.objects.none()
 
-        employee_id = self.request.query_params.get("employee_id")
-        if employee_id:
-            qs = qs.filter(user_profile_id=employee_id)
-        since = self.request.query_params.get("since")
-        if since:
-            qs = qs.filter(effective_date__gte=since)
-        bonus_type = self.request.query_params.get("bonus_type")
-        if bonus_type:
-            qs = qs.filter(bonus_type=bonus_type)
+        qs = self._apply_bonus_filters(qs, self.request)
 
         if is_compensation_admin(user):
             return qs
@@ -10780,7 +10761,8 @@ class CompensationPolicyViewSet(viewsets.ModelViewSet):
         if not is_compensation_admin(request.user):
             raise PermissionDenied("HR-only.")
 
-    def _policy_salary_value(self, value):
+    @staticmethod
+    def _policy_salary_value(value):
         if value in (None, ""):
             return None
         return float(value)
@@ -10870,6 +10852,18 @@ class BenefitCatalogViewSet(viewsets.ModelViewSet):
 # ──────────────────────────────────────────
 # Feedback & Surveys
 # ──────────────────────────────────────────
+
+
+def _is_hr_or_staff(user):
+    """Check if the given user has HR/staff/superuser role."""
+    if getattr(user, "is_staff", False) or getattr(user, "is_superuser", False):
+        return True
+    try:
+        profile = user.profile
+    except (AttributeError, UserProfile.DoesNotExist):
+        return False
+    role = getattr(profile, "role", None)
+    return bool(role and role.name and "hr" in role.name.lower())
 
 
 class IsHROrStaffForSurveyWrite(permissions.BasePermission):
@@ -11047,16 +11041,83 @@ class SurveyViewSet(viewsets.ModelViewSet):
         )
 
     def _user_is_hr_or_staff(self, request) -> bool:
-        if getattr(request.user, "is_staff", False) or getattr(
-            request.user, "is_superuser", False
-        ):
-            return True
-        try:
-            profile = request.user.profile
-        except (AttributeError, UserProfile.DoesNotExist):
-            return False
-        role = getattr(profile, "role", None)
-        return bool(role and role.name and "hr" in role.name.lower())
+        """Check HR/staff/superuser permission (delegates to module-level helper)."""
+        return _is_hr_or_staff(request.user)
+
+    def _build_question_aggregations(self, survey, response_ids, questions) -> list:
+        """Build per-question aggregation payload."""
+        from collections import defaultdict
+
+        questions_payload = []
+        for question in questions:
+            answers = Answer.objects.filter(
+                question=question, response_id__in=response_ids
+            )
+            response_count = answers.count()
+
+            entry: dict[str, Any] = {
+                "question_id": question.id,
+                "text": question.text,
+                "type": question.type,
+                "response_count": response_count,
+            }
+
+            if question.type == "choice":
+                counts: dict[str, int] = defaultdict(int)
+                for value in answers.values_list("value", flat=True):
+                    counts[value] += 1
+                options = question.options if isinstance(question.options, list) else []
+                distribution = [
+                    {"value": opt, "count": counts.get(opt, 0)} for opt in options
+                ]
+                for value, cnt in counts.items():
+                    if value not in options:
+                        distribution.append({"value": value, "count": cnt})
+                entry["distribution"] = distribution
+
+            elif question.type == "scale":
+                numeric_values: list[int] = []
+                for raw in answers.values_list("value", flat=True):
+                    try:
+                        numeric_values.append(int(raw))
+                    except (TypeError, ValueError):
+                        continue
+                avg = (
+                    sum(numeric_values) / len(numeric_values) if numeric_values else 0.0
+                )
+                bucket_counts: dict[int, int] = defaultdict(int)
+                for v in numeric_values:
+                    bucket_counts[v] += 1
+                entry["average"] = round(avg, 2)
+                entry["distribution"] = [
+                    {"value": str(v), "count": bucket_counts[v]}
+                    for v in sorted(bucket_counts.keys())
+                ]
+
+            else:  # text
+                samples = list(
+                    answers.exclude(value="").values_list("value", flat=True)[:10]
+                )
+                entry["samples"] = samples
+
+            questions_payload.append(entry)
+
+        return questions_payload
+
+    def _validate_and_save_response(self, survey, profile, clean, valid_question_ids):
+        """Validate and persist response + answers in a transaction."""
+        from django.db import transaction
+
+        with transaction.atomic():
+            response = SurveyResponse(survey=survey, respondent=profile)
+            response.save()
+            Answer.objects.bulk_create(
+                [
+                    Answer(question_id=qid, response=response, value=value)
+                    for qid, value in clean
+                ]
+            )
+        return response
 
     @extend_schema(
         summary="Get aggregated survey analytics",
@@ -11101,62 +11162,9 @@ class SurveyViewSet(viewsets.ModelViewSet):
         total_responses = len(response_ids)
 
         # Per-question aggregations
-        questions_payload = []
-        for question in survey.questions.order_by("order", "id"):
-            answers = Answer.objects.filter(
-                question=question, response_id__in=response_ids
-            )
-            response_count = answers.count()
-
-            entry: dict[str, Any] = {
-                "question_id": question.id,
-                "text": question.text,
-                "type": question.type,
-                "response_count": response_count,
-            }
-
-            if question.type == "choice":
-                # Counts per option label.
-                counts: dict[str, int] = defaultdict(int)
-                for value in answers.values_list("value", flat=True):
-                    counts[value] += 1
-                # Always include every defined option (zero-fill).
-                options = question.options if isinstance(question.options, list) else []
-                distribution = [
-                    {"value": opt, "count": counts.get(opt, 0)} for opt in options
-                ]
-                # Also surface any "other" answer values not in the defined options.
-                for value, cnt in counts.items():
-                    if value not in options:
-                        distribution.append({"value": value, "count": cnt})
-                entry["distribution"] = distribution
-
-            elif question.type == "scale":
-                numeric_values: list[int] = []
-                for raw in answers.values_list("value", flat=True):
-                    try:
-                        numeric_values.append(int(raw))
-                    except (TypeError, ValueError):
-                        continue
-                avg = (
-                    sum(numeric_values) / len(numeric_values) if numeric_values else 0.0
-                )
-                bucket_counts: dict[int, int] = defaultdict(int)
-                for v in numeric_values:
-                    bucket_counts[v] += 1
-                entry["average"] = round(avg, 2)
-                entry["distribution"] = [
-                    {"value": str(v), "count": bucket_counts[v]}
-                    for v in sorted(bucket_counts.keys())
-                ]
-
-            else:  # text
-                samples = list(
-                    answers.exclude(value="").values_list("value", flat=True)[:10]
-                )
-                entry["samples"] = samples
-
-            questions_payload.append(entry)
+        questions_payload = self._build_question_aggregations(
+            survey, response_ids, list(survey.questions.order_by("order", "id"))
+        )
 
         # Daily response trend.
         trend_counts: dict[str, int] = defaultdict(int)
@@ -11385,19 +11393,9 @@ class SurveyViewSet(viewsets.ModelViewSet):
             )
 
         # Persist response + answers in a transaction.
-        from django.db import transaction
-
-        with transaction.atomic():
-            # The Response.save() override automatically nulls respondent
-            # when the survey is anonymous — no extra logic needed here.
-            response = SurveyResponse(survey=survey, respondent=profile)
-            response.save()
-            Answer.objects.bulk_create(
-                [
-                    Answer(question_id=qid, response=response, value=value)
-                    for qid, value in clean
-                ]
-            )
+        response = self._validate_and_save_response(
+            survey, profile, clean, valid_question_ids
+        )
 
         return Response(
             {
@@ -11519,56 +11517,8 @@ class PulseCheckViewSet(
         qs = PulseCheck.objects.filter(created_at__gte=cutoff)
 
         rows = list(qs.values_list("value", "created_at", "category"))
-        values = [r[0] for r in rows]
-        count = len(values)
-        average = round(sum(values) / count, 2) if count else 0.0
-
-        # Per-day aggregation (all categories combined).
-        by_day_map: dict[str, list[int]] = defaultdict(list)
-        for value, created_at, _ in rows:
-            by_day_map[created_at.date().isoformat()].append(value)
-        by_day = [
-            {
-                "date": day,
-                "count": len(vals),
-                "average": round(sum(vals) / len(vals), 2),
-            }
-            for day, vals in sorted(by_day_map.items())
-        ]
-
-        # Distribution across the 1–5 scale, zero-filled.
-        dist_counts: dict[int, int] = {n: 0 for n in range(1, 6)}
-        for v in values:
-            dist_counts[v] = dist_counts.get(v, 0) + 1
-        distribution = [{"value": n, "count": dist_counts[n]} for n in range(1, 6)]
-
-        # Per-category averages (overall, workload, management, culture).
-        by_cat_map: dict[str, list[int]] = defaultdict(list)
-        for value, _, category in rows:
-            by_cat_map[category].append(value)
-        by_category = [
-            {
-                "category": cat,
-                "count": len(by_cat_map.get(cat, [])),
-                "average": (
-                    round(sum(by_cat_map[cat]) / len(by_cat_map[cat]), 2)
-                    if by_cat_map.get(cat)
-                    else 0.0
-                ),
-            }
-            for cat, _ in PulseCheck.CATEGORY_CHOICES
-        ]
-
-        return Response(
-            {
-                "days": days,
-                "count": count,
-                "average": average,
-                "by_day": by_day,
-                "distribution": distribution,
-                "by_category": by_category,
-            }
-        )
+        summary_data = self._build_pulse_summary(rows, days)
+        return Response(summary_data)
 
 
 # ──────────────────────────────────────────
@@ -11624,12 +11574,7 @@ class SuggestionViewSet(
         return super().update(request, *args, **kwargs)
 
     def partial_update(self, request, *args, **kwargs):
-        if not self._is_hr_or_staff(request):
-            return Response(
-                {"detail": "Only HR can change suggestion status."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-        return super().partial_update(request, *args, **kwargs)
+        return self.update(request, *args, **kwargs)
 
     def perform_create(self, serializer):
         # Honor the anonymity flag: drop the FK to the submitter when set.
