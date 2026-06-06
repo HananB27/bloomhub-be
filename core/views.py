@@ -852,6 +852,72 @@ class TokenRefreshViewCustom(TokenRefreshView):
 class UploadRolePermissionsView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @staticmethod
+    def _parse_csv_to_operations(file_content: str) -> dict:
+        """Parse CSV content and return a dict of role_id -> operations."""
+        reader = csv.DictReader(io.StringIO(file_content))
+        roles_operations = {}
+        for row in reader:
+            role_id = row.get("role_id")
+            module_name = row.get("module_name")
+            feature_action = row.get("feature_action")
+            permission_str = row.get("permission")
+            operation_type = row.get("operation_type", "override").lower()
+
+            if not role_id or not module_name or not feature_action or not permission_str:
+                continue
+
+            permission, _ = Permission.objects.get_or_create(
+                module_name=module_name, feature_action=feature_action
+            )
+            role, _ = Role.objects.get_or_create(
+                name=role_id, defaults={"description": f"Role {role_id}"}
+            )
+
+            if role_id not in roles_operations:
+                roles_operations[role_id] = {
+                    "override": set(),
+                    "add": set(),
+                    "remove": set(),
+                    "merge": {},
+                }
+
+            ops = roles_operations[role_id]
+            desired = permission_str.upper() == "YES"
+
+            if operation_type == "override" and desired:
+                ops["override"].add(permission)
+            elif operation_type == "add" and desired:
+                ops["add"].add(permission)
+            elif operation_type == "remove" and desired:
+                ops["remove"].add(permission)
+            elif operation_type == "merge":
+                ops["merge"][permission] = desired
+
+        return roles_operations
+
+    @staticmethod
+    def _apply_operations(roles_operations: dict) -> None:
+        """Apply the parsed operations to the database roles."""
+        for role_id, ops in roles_operations.items():
+            role = Role.objects.get(name=role_id)
+
+            if ops["override"]:
+                role.permissions.set(ops["override"])
+            else:
+                if ops["add"]:
+                    role.permissions.add(*ops["add"])
+                if ops["remove"]:
+                    role.permissions.remove(*ops["remove"])
+                if ops["merge"]:
+                    current = set(role.permissions.all())
+                    for perm, desired in ops["merge"].items():
+                        if desired:
+                            current.add(perm)
+                        else:
+                            current.discard(perm)
+                    role.permissions.set(current)
+
     def post(self, request):
         if not request.user.is_staff and not request.user.is_superuser:
             return Response(
@@ -875,77 +941,10 @@ class UploadRolePermissionsView(APIView):
         )
 
         try:
-            # Process the CSV
             csv_file.seek(0)  # Reset file pointer
             file_content = csv_file.read().decode("utf-8")
-            reader = csv.DictReader(io.StringIO(file_content))
-
-            roles_operations = {}
-            for row in reader:
-                role_id = row.get("role_id")
-                module_name = row.get("module_name")
-                feature_action = row.get("feature_action")
-                permission_str = row.get("permission")
-                operation_type = row.get("operation_type", "override").lower()
-
-                if (
-                    not role_id
-                    or not module_name
-                    or not feature_action
-                    or not permission_str
-                ):
-                    continue
-
-                # Get or create permission
-                permission, _ = Permission.objects.get_or_create(
-                    module_name=module_name, feature_action=feature_action
-                )
-
-                # Get or create role
-                role, _ = Role.objects.get_or_create(
-                    name=role_id, defaults={"description": f"Role {role_id}"}
-                )
-
-                # Initialize operations for role
-                if role_id not in roles_operations:
-                    roles_operations[role_id] = {
-                        "override": set(),
-                        "add": set(),
-                        "remove": set(),
-                        "merge": {},
-                    }
-
-                ops = roles_operations[role_id]
-                desired = permission_str.upper() == "YES"
-
-                if operation_type == "override" and desired:
-                    ops["override"].add(permission)
-                elif operation_type == "add" and desired:
-                    ops["add"].add(permission)
-                elif operation_type == "remove" and desired:
-                    ops["remove"].add(permission)
-                elif operation_type == "merge":
-                    ops["merge"][permission] = desired
-
-            # Now apply operations to roles
-            for role_id, ops in roles_operations.items():
-                role = Role.objects.get(name=role_id)
-
-                if ops["override"]:
-                    role.permissions.set(ops["override"])
-                else:
-                    if ops["add"]:
-                        role.permissions.add(*ops["add"])
-                    if ops["remove"]:
-                        role.permissions.remove(*ops["remove"])
-                    if ops["merge"]:
-                        current = set(role.permissions.all())
-                        for perm, desired in ops["merge"].items():
-                            if desired:
-                                current.add(perm)
-                            else:
-                                current.discard(perm)
-                        role.permissions.set(current)
+            roles_operations = self._parse_csv_to_operations(file_content)
+            self._apply_operations(roles_operations)
 
             return Response(
                 {
@@ -1189,30 +1188,11 @@ class EmployeeProfileViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=["get"], url_path="managers")
     def get_managers(self, request):
         """Get employees who can be assigned as managers (MGR, MGR+, ADMIN roles)"""
-        # Get the role filter from query parameters
         role_param = request.query_params.get("role", None)
+        manager_roles, error_response = self._validate_manager_roles(role_param)
+        if error_response:
+            return error_response
 
-        # Define which roles can be managers
-        manager_roles = ["MGR", "MGR+", "ADMIN"]
-
-        if role_param:
-            # URL decode the parameter to handle special characters like +
-            role_param = unquote(role_param)
-            # Parse comma-separated roles
-            requested_roles = [r.strip().upper() for r in role_param.split(",")]
-
-            # Validate all requested roles
-            invalid_roles = [r for r in requested_roles if r not in manager_roles]
-            if invalid_roles:
-                return Response(
-                    {
-                        "error": f"Invalid role(s): {', '.join(invalid_roles)}. Must be one of: {', '.join(manager_roles)}"
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-            manager_roles = requested_roles
-
-        # Get employees with manager roles
         employees = (
             UserProfile.objects.filter(role__name__in=manager_roles)
             .select_related("user", "role")
@@ -1291,24 +1271,9 @@ class EmployeeProfileViewSet(viewsets.ModelViewSet):
         """
         instance = self.get_object()
 
-        # Check permission to update employee profiles
-        try:
-            perm = Permission.objects.get(
-                module_name="Employee Profiles", feature_action="update_any_profile"
-            )
-            if not request.user.profile.has_permission(perm):
-                return Response(
-                    {
-                        "error": "You do not have permission to update employee profiles."
-                    },
-                    status=status.HTTP_403_FORBIDDEN,
-                )
-        except Permission.DoesNotExist:
-            # If permission doesn't exist, deny access for safety
-            return Response(
-                {"error": "Permission check failed. Contact administrator."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+        error_response = self._check_bulk_update_permission(request)
+        if error_response:
+            return error_response
 
         serializer = EmployeeProfileSerializer(
             instance, data=request.data, partial=True, context={"request": request}
@@ -1344,25 +1309,9 @@ class EmployeeProfileViewSet(viewsets.ModelViewSet):
         profile = self.get_object()
 
         sections_raw = (request.query_params.get("sections") or "").strip()
-        if sections_raw:
-            sections_set = frozenset(
-                s.strip().lower() for s in sections_raw.split(",") if s.strip()
-            )
-            invalid = sections_set - _PROFILE_MODAL_BUNDLE_SECTIONS
-            if invalid:
-                return Response(
-                    {
-                        "detail": (
-                            "Unknown section(s): "
-                            f"{', '.join(sorted(invalid))}. "
-                            f"Allowed: {', '.join(sorted(_PROFILE_MODAL_BUNDLE_SECTIONS))}."
-                        )
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-            sections = sections_set
-        else:
-            sections = _PROFILE_MODAL_BUNDLE_SECTIONS
+        sections, error_response = self._parse_profile_modal_sections(sections_raw)
+        if error_response:
+            return error_response
 
         etag = _profile_modal_bundle_etag(profile, sections)
         if_none_match = (request.META.get("HTTP_IF_NONE_MATCH") or "").strip()
@@ -1499,22 +1448,18 @@ class EmployeeProfileViewSet(viewsets.ModelViewSet):
             or 0
         )
 
-        with transaction.atomic():
-            profile.documents.filter(doc_type=DocumentType.CV, is_current=True).update(
-                is_current=False
-            )
-            doc = EmployeeDocument.objects.create(
-                user_profile=profile,
-                doc_type=DocumentType.CV,
-                file=cv_file,
-                version=latest_version + 1,
-                is_current=True,
-                source_type=EmployeeDocument.SourceType.FILE,
-                provider=EmployeeDocument.ProviderType.INTERNAL,
-                file_name=filename,
-                file_size=cv_file.size,
-                mime_type=getattr(cv_file, "content_type", "") or None,
-            )
+        doc = self._create_cv_document(
+            profile,
+            latest_version + 1,
+            {
+                "file": cv_file,
+                "source_type": EmployeeDocument.SourceType.FILE,
+                "provider": EmployeeDocument.ProviderType.INTERNAL,
+                "file_name": filename,
+                "file_size": cv_file.size,
+                "mime_type": getattr(cv_file, "content_type", "") or None,
+            },
+        )
 
         return Response(EmployeeCVSerializer(doc).data, status=status.HTTP_201_CREATED)
 
@@ -1569,6 +1514,21 @@ class EmployeeProfileViewSet(viewsets.ModelViewSet):
             if path_parts:
                 canva_design_id = path_parts[-1]
 
+        doc = self._create_cv_document(
+            profile,
+            latest_version + 1,
+            {
+                "source_type": EmployeeDocument.SourceType.EXTERNAL_LINK,
+                "provider": provider,
+                "external_url": external_url,
+                "file_name": request.data.get("file_name") or None,
+                "canva_design_id": canva_design_id or None,
+            },
+        )
+
+        return Response(EmployeeCVSerializer(doc).data, status=status.HTTP_201_CREATED)
+
+    def _create_cv_document(self, profile, version, extra_fields):
         with transaction.atomic():
             profile.documents.filter(doc_type=DocumentType.CV, is_current=True).update(
                 is_current=False
@@ -1576,16 +1536,68 @@ class EmployeeProfileViewSet(viewsets.ModelViewSet):
             doc = EmployeeDocument.objects.create(
                 user_profile=profile,
                 doc_type=DocumentType.CV,
-                version=latest_version + 1,
+                version=version,
                 is_current=True,
-                source_type=EmployeeDocument.SourceType.EXTERNAL_LINK,
-                provider=provider,
-                external_url=external_url,
-                file_name=request.data.get("file_name") or None,
-                canva_design_id=canva_design_id or None,
+                **extra_fields,
             )
+        return doc
 
-        return Response(EmployeeCVSerializer(doc).data, status=status.HTTP_201_CREATED)
+    def _validate_manager_roles(self, role_param):
+        manager_roles = ["MGR", "MGR+", "ADMIN"]
+        if role_param:
+            role_param = unquote(role_param)
+            requested_roles = [r.strip().upper() for r in role_param.split(",")]
+            invalid_roles = [r for r in requested_roles if r not in manager_roles]
+            if invalid_roles:
+                return None, Response(
+                    {
+                        "error": f"Invalid role(s): {', '.join(invalid_roles)}. Must be one of: {', '.join(manager_roles)}"
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            manager_roles = requested_roles
+        return manager_roles, None
+
+    def _parse_profile_modal_sections(self, sections_raw):
+        if sections_raw:
+            sections_set = frozenset(
+                s.strip().lower() for s in sections_raw.split(",") if s.strip()
+            )
+            invalid = sections_set - _PROFILE_MODAL_BUNDLE_SECTIONS
+            if invalid:
+                return None, Response(
+                    {
+                        "detail": (
+                            "Unknown section(s): "
+                            f"{', '.join(sorted(invalid))}. "
+                            f"Allowed: {', '.join(sorted(_PROFILE_MODAL_BUNDLE_SECTIONS))}."
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            sections = sections_set
+        else:
+            sections = _PROFILE_MODAL_BUNDLE_SECTIONS
+        return sections, None
+
+    def _check_bulk_update_permission(self, request):
+        try:
+            perm = Permission.objects.get(
+                module_name="Employee Profiles", feature_action="update_any_profile"
+            )
+            if not request.user.profile.has_permission(perm):
+                return Response(
+                    {
+                        "error": "You do not have permission to update employee profiles."
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+        except Permission.DoesNotExist:
+            return Response(
+                {"error": "Permission check failed. Contact administrator."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return None
 
 
 _PROFILE_MODAL_BUNDLE_SECTIONS = frozenset({"employee", "cvs", "lookups", "cpf_levels"})
@@ -1884,11 +1896,9 @@ class ProjectDetailView(APIView):
         return self._update(request, pk, partial=True)
 
     def _update(self, request, pk, partial):
-        project = Project.objects.filter(pk=pk).first()
-        if project is None:
-            return Response(
-                {"error": "Project not found."}, status=status.HTTP_404_NOT_FOUND
-            )
+        project, error = _get_project_or_error(pk)
+        if error:
+            return error
         if not can_modify_projects(request.user):
             return Response(
                 {"error": "You do not have permission to update projects."},
@@ -2091,11 +2101,9 @@ class ProjectAssignmentListCreateView(APIView):
 
     @extend_schema(responses={200: ProjectAssignmentSerializer(many=True), 404: None})
     def get(self, request, project_pk):
-        project = self._get_project(project_pk)
-        if project is None:
-            return Response(
-                {"error": "Project not found."}, status=status.HTTP_404_NOT_FOUND
-            )
+        project, error = _get_project_or_error(project_pk)
+        if error:
+            return error
         if not can_view_project(request.user, project):
             return Response(
                 {"error": "You do not have permission to view this project."},
@@ -2211,12 +2219,9 @@ class ProjectAssignmentDetailView(APIView):
 
     @extend_schema(responses={200: ProjectAssignmentSerializer, 404: None})
     def get(self, request, pk):
-        assignment = self._get_assignment(pk)
-        if assignment is None:
-            return Response(
-                {"error": "Assignment not found."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+        assignment, error = _get_assignment_or_error(pk)
+        if error:
+            return error
         if not can_view_project(request.user, assignment.project):
             return Response(
                 {"error": "You do not have permission to view this assignment."},
@@ -2283,16 +2288,9 @@ class ProjectAssignmentEndView(APIView):
         responses={200: ProjectAssignmentSerializer, 400: None, 403: None, 404: None},
     )
     def post(self, request, pk):
-        assignment = (
-            ProjectAssignment.objects.select_related("user_profile__user", "project")
-            .filter(pk=pk)
-            .first()
-        )
-        if assignment is None:
-            return Response(
-                {"error": "Assignment not found."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+        assignment, error = _get_assignment_or_error(pk)
+        if error:
+            return error
         if not can_modify_projects(request.user):
             return Response(
                 {"error": "You do not have permission to end assignments."},
@@ -2639,6 +2637,29 @@ def _assignment_update_permission(request) -> str:
     if return_fields.intersection(set(request.data.keys())):
         return "process_asset_return"
     return "assign_assets"
+
+
+def _get_project_or_error(pk):
+    project = Project.objects.filter(pk=pk).first()
+    if project is None:
+        return None, Response(
+            {"error": "Project not found."}, status=status.HTTP_404_NOT_FOUND
+        )
+    return project, None
+
+
+def _get_assignment_or_error(pk):
+    assignment = (
+        ProjectAssignment.objects.select_related("user_profile__user", "project")
+        .filter(pk=pk)
+        .first()
+    )
+    if assignment is None:
+        return None, Response(
+            {"error": "Assignment not found."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+    return assignment, None
 
 
 @extend_schema(
@@ -3011,27 +3032,9 @@ class AssignmentListView(APIView):
 
     def get(self, request):
         """Get list of assignments with optional filtering, scoped by visibility permissions."""
-        user = request.user
-
-        if has_asset_permission(user, "view_all_assets"):
-            assignments = Assignment.objects.all()
-        elif has_asset_permission(user, "view_team_assets"):
-            try:
-                profile = user.profile
-            except Exception:
-                return Response([], status=status.HTTP_200_OK)
-            team_ids = profile.direct_reports.values_list("id", flat=True)
-            assignments = Assignment.objects.filter(
-                employee_id__in=list(team_ids) + [profile.id]
-            )
-        elif has_asset_permission(user, "view_own_assets"):
-            try:
-                profile = user.profile
-            except Exception:
-                return Response([], status=status.HTTP_200_OK)
-            assignments = Assignment.objects.filter(employee=profile)
-        else:
-            assignments = Assignment.objects.none()
+        assignments = self._get_assignments_for_user(request.user)
+        if assignments is None:
+            return Response([], status=status.HTTP_200_OK)
 
         # Apply additional filters
         active_filter = request.query_params.get("active")
@@ -3053,6 +3056,27 @@ class AssignmentListView(APIView):
             assignments, many=True, context={"request": request}
         )
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def _get_assignments_for_user(self, user):
+        if has_asset_permission(user, "view_all_assets"):
+            return Assignment.objects.all()
+        elif has_asset_permission(user, "view_team_assets"):
+            try:
+                profile = user.profile
+            except Exception:
+                return None
+            team_ids = profile.direct_reports.values_list("id", flat=True)
+            return Assignment.objects.filter(
+                employee_id__in=list(team_ids) + [profile.id]
+            )
+        elif has_asset_permission(user, "view_own_assets"):
+            try:
+                profile = user.profile
+            except Exception:
+                return None
+            return Assignment.objects.filter(employee=profile)
+        else:
+            return Assignment.objects.none()
 
     @extend_schema(
         request=AssignmentCreateSerializer,
@@ -3202,41 +3226,7 @@ class AssignmentRequestReturnView(APIView):
                     status=status.HTTP_403_FORBIDDEN,
                 )
 
-        serializer = AssignmentRequestReturnSerializer(assignment, data=request.data)
-        if serializer.is_valid():
-            from django.utils import timezone
-
-            assignment.return_request_status = Assignment.ReturnRequestStatus.PENDING
-            assignment.return_requested_by = request.user.profile
-            assignment.return_requested_at = timezone.now()
-            assignment.return_reviewed_by = None
-            assignment.return_reviewed_at = None
-            assignment.return_rejection_reason = None
-            assignment.return_description = serializer.validated_data.get(
-                "return_description", assignment.return_description
-            )
-            assignment.return_checklist = serializer.validated_data.get(
-                "return_checklist", assignment.return_checklist
-            )
-            assignment.notes = serializer.validated_data.get("notes", assignment.notes)
-            assignment.save(
-                update_fields=[
-                    "return_request_status",
-                    "return_requested_by",
-                    "return_requested_at",
-                    "return_reviewed_by",
-                    "return_reviewed_at",
-                    "return_rejection_reason",
-                    "return_description",
-                    "return_checklist",
-                    "notes",
-                ]
-            )
-            return Response(
-                AssignmentSerializer(assignment, context={"request": request}).data,
-                status=status.HTTP_200_OK,
-            )
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        return self._process_return_request(assignment, serializer, request.user.profile)
 
 
 @extend_schema(
@@ -4063,22 +4053,32 @@ class ChecklistTaskViewSet(viewsets.ModelViewSet):
         ),
         responses={200: ChecklistTaskSerializer},
     )
-    def partial_update(self, request, *args, **kwargs):
-        task = self.get_object()
-
+    def _get_profile_or_error(self, request):
+        """Helper to fetch user profile or return error response."""
         try:
-            profile = request.user.profile
+            return request.user.profile, None
         except (AttributeError, UserProfile.DoesNotExist):
-            return Response(
+            return None, Response(
                 {"detail": "User profile not found."},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        is_hr_or_staff = (
-            request.user.is_staff
-            or request.user.is_superuser
+    def _is_hr_or_staff(self, user, profile):
+        """Check if user is HR/staff."""
+        return (
+            user.is_staff
+            or user.is_superuser
             or (profile.role and profile.role.name.lower() == "hr")
         )
+
+    def partial_update(self, request, *args, **kwargs):
+        task = self.get_object()
+
+        profile, error = self._get_profile_or_error(request)
+        if error:
+            return error
+
+        is_hr_or_staff = self._is_hr_or_staff(request.user, profile)
         if not (is_hr_or_staff or task.assigned_to == profile):
             return Response(
                 {"detail": "Only the assigned user or HR/staff can update this task."},
@@ -4109,9 +4109,8 @@ class ChecklistTaskViewSet(viewsets.ModelViewSet):
     )
     @action(detail=False, methods=["get"], url_path="my-tasks")
     def my_tasks(self, request):
-        try:
-            profile = request.user.profile
-        except (AttributeError, UserProfile.DoesNotExist):
+        profile, error = self._get_profile_or_error(request)
+        if error:
             # Superusers/staff without a profile have no assigned tasks
             return Response([])
 
@@ -4132,35 +4131,34 @@ class ChecklistTaskViewSet(viewsets.ModelViewSet):
         methods=["get"],
         url_path=r"employee/(?P<employee_id>[^/.]+)",
     )
-    def employee_tasks(self, request, employee_id=None):
+    def _get_employee_profile_or_error(self, employee_id):
+        """Helper to fetch employee profile or return error response."""
         try:
-            profile = request.user.profile
-        except (AttributeError, UserProfile.DoesNotExist):
-            profile = None
-
-        try:
-            employee_profile = UserProfile.objects.get(pk=employee_id)
+            return UserProfile.objects.get(pk=employee_id), None
         except UserProfile.DoesNotExist:
-            return Response(
+            return None, Response(
                 {"detail": "Employee not found."},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        can_view = (
-            request.user.is_staff
-            or request.user.is_superuser
-            or (
-                profile is not None
-                and profile.role
-                and profile.role.name.lower() == "hr"
-            )
-            or (
-                profile is not None
-                and employee_profile.managers.filter(pk=profile.pk).exists()
-            )
-        )
+    def _can_view_employee_tasks(self, request, profile, employee_profile):
+        """Check if the user can view tasks for the given employee."""
+        if request.user.is_staff or request.user.is_superuser:
+            return True
+        if profile and profile.role and profile.role.name.lower() == "hr":
+            return True
+        if profile and employee_profile.managers.filter(pk=profile.pk).exists():
+            return True
+        return False
 
-        if not can_view:
+    def employee_tasks(self, request, employee_id=None):
+        profile, _ = self._get_profile_or_error(request)
+
+        employee_profile, error = self._get_employee_profile_or_error(employee_id)
+        if error:
+            return error
+
+        if not self._can_view_employee_tasks(request, profile, employee_profile):
             return Response(
                 {"detail": "You do not have permission to view this employee's tasks."},
                 status=status.HTTP_403_FORBIDDEN,
@@ -4197,17 +4195,17 @@ class ChecklistInstanceViewSet(
                 {"detail": "User profile not found."},
                 status=status.HTTP_404_NOT_FOUND,
             )
-        is_privileged = (
-            request.user.is_staff
-            or request.user.is_superuser
-            or (profile.role and profile.role.name.lower() in {"hr", "manager"})
+
+        if self._is_hr_or_staff(request.user, profile):
+            return profile, None
+
+        if profile.role and profile.role.name.lower() == "manager":
+            return profile, None
+
+        return None, Response(
+            {"detail": "Only HR or managers can manage checklists."},
+            status=status.HTTP_403_FORBIDDEN,
         )
-        if not is_privileged:
-            return None, Response(
-                {"detail": "Only HR or managers can manage checklists."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-        return profile, None
 
     @extend_schema(
         summary="Assign a checklist template to an employee",
@@ -4404,35 +4402,31 @@ class LeaveRequestViewSet(viewsets.ModelViewSet):
     ordering_fields = ["submitted_date", "start_date"]
     ordering = ["-submitted_date"]
 
-    def get_queryset(self):
-        """Filter requests based on user permissions."""
-        user = self.request.user
+    def _get_leave_request_queryset(self, user):
+        """Build the base queryset for leave requests based on user permissions."""
+        base_qs = LeaveRequest.objects.all().select_related(
+            "employee__user",
+            "covering_employee__user",
+            "approver__user",
+        )
 
         # HR admins can see all requests
         if user.is_staff or user.is_superuser:
-            return LeaveRequest.objects.all().select_related(
-                "employee__user",
-                "covering_employee__user",
-                "approver__user",
-            )
+            return base_qs
 
         # Regular employees see only their own and their team's
         try:
             profile = user.profile
             # Get own requests and requests from direct reports
-            own_requests = LeaveRequest.objects.filter(employee=profile)
-            team_requests = LeaveRequest.objects.filter(employee__manager=profile)
-            return (
-                (own_requests | team_requests)
-                .distinct()
-                .select_related(
-                    "employee__user",
-                    "covering_employee__user",
-                    "approver__user",
-                )
-            )
+            own_requests = base_qs.filter(employee=profile)
+            team_requests = base_qs.filter(employee__manager=profile)
+            return (own_requests | team_requests).distinct()
         except Exception:
             return LeaveRequest.objects.none()
+
+    def get_queryset(self):
+        """Filter requests based on user permissions."""
+        return self._get_leave_request_queryset(self.request.user)
 
     def get_serializer_class(self):
         """Use different serializers for different actions."""
@@ -6176,33 +6170,6 @@ def _build_budget_warning(employee, fiscal_year):
     }
 
 
-def _build_budget_warning(employee, fiscal_year):
-    """Return a warning dict when usage crosses 80% or exceeds the allocation."""
-    from decimal import Decimal
-
-    from .constants import TRAINING_BUDGET_WARNING_THRESHOLD
-
-    budget = TrainingBudget.objects.filter(
-        employee=employee, fiscal_year=fiscal_year
-    ).first()
-    if budget is None or not budget.allocated_budget:
-        return None
-
-    ratio = (budget.used_budget or Decimal("0.00")) / budget.allocated_budget
-    if ratio < TRAINING_BUDGET_WARNING_THRESHOLD:
-        return None
-
-    exceeded = budget.used_budget > budget.allocated_budget
-    return {
-        "level": "exceeded" if exceeded else "approaching_limit",
-        "fiscal_year": budget.fiscal_year,
-        "allocated_budget": str(budget.allocated_budget),
-        "used_budget": str(budget.used_budget),
-        "remaining_budget": str(budget.remaining_budget),
-        "percent_used": int(round(float(budget.budget_percentage_used))),
-    }
-
-
 @extend_schema(tags=["Training & Development"])
 class TrainingEntryViewSet(viewsets.ModelViewSet):
     """
@@ -6270,7 +6237,6 @@ class TrainingEntryViewSet(viewsets.ModelViewSet):
         # Store instance for use in create method
         self.created_instance = instance
         recalculate_budget(instance.employee, instance.training_date.year)
-        recalculate_budget(instance.employee, instance.training_date.year)
 
     def create(self, request, *args, **kwargs):
         """Override create to return response with status field."""
@@ -6278,14 +6244,6 @@ class TrainingEntryViewSet(viewsets.ModelViewSet):
         # Re-serialize the created instance with DetailSerializer to include status
         if response.status_code == 201 and hasattr(self, "created_instance"):
             detail_serializer = TrainingEntryDetailSerializer(self.created_instance)
-            data = detail_serializer.data
-            warning = _build_budget_warning(
-                self.created_instance.employee,
-                self.created_instance.training_date.year,
-            )
-            if warning is not None:
-                data["budget_warning"] = warning
-            response.data = data
             data = detail_serializer.data
             warning = _build_budget_warning(
                 self.created_instance.employee,
@@ -6330,10 +6288,7 @@ class TrainingEntryViewSet(viewsets.ModelViewSet):
         """Delete entry (employee: own only, HR: any)."""
         employee = instance.employee
         year = instance.training_date.year
-        employee = instance.employee
-        year = instance.training_date.year
         instance.delete()
-        recalculate_budget(employee, year)
         recalculate_budget(employee, year)
 
     @extend_schema(
@@ -8051,9 +8006,7 @@ class TimeTrackingSourceChangeResolveView(APIView):
         action = serializer.validated_data["action"]
         metadata = dict(entry.source_metadata or {})
         if action == "accept_current":
-            metadata["source_change_flag"] = TimeEntrySourceChangeFlag.NONE
-            entry.source_metadata = metadata
-            entry.save(update_fields=["source_metadata", "updated_at"])
+            self._accept_current_source_change(entry, metadata)
             message = "Accepted current BloomHub time entry value."
         elif action == "apply_source":
             if entry.status == TimeEntryStatus.APPROVED:
@@ -8061,25 +8014,9 @@ class TimeTrackingSourceChangeResolveView(APIView):
                     {"detail": "Approved entries cannot be changed by source review."},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-            pending = metadata.get("source_pending_update") or {}
-            if "work_date" in pending:
-                parsed_date = parse_date(pending["work_date"])
-                if parsed_date is None:
-                    return Response(
-                        {"detail": "Pending source update contains invalid work_date."},
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
-                entry.work_date = parsed_date
-            if "hours" in pending:
-                entry.hours = Decimal(str(pending["hours"]))
-            if "notes" in pending:
-                entry.notes = pending["notes"]
-            metadata["source_change_flag"] = TimeEntrySourceChangeFlag.NONE
-            metadata.pop("source_pending_update", None)
-            entry.source_metadata = metadata
-            entry.duplicate_fingerprint = fingerprint_for_entry(entry)
-            entry.full_clean()
-            entry.save()
+            result = self._apply_source_update(entry, metadata)
+            if result is not None:
+                return result
             message = "Applied source update to unapproved time entry."
         else:
             message = "Left source change flagged for later review."
@@ -8094,6 +8031,33 @@ class TimeTrackingSourceChangeResolveView(APIView):
             },
         )
         return Response(TimeEntrySerializer(entry).data)
+
+    def _accept_current_source_change(self, entry, metadata):
+        metadata["source_change_flag"] = TimeEntrySourceChangeFlag.NONE
+        entry.source_metadata = metadata
+        entry.save(update_fields=["source_metadata", "updated_at"])
+
+    def _apply_source_update(self, entry, metadata):
+        pending = metadata.get("source_pending_update") or {}
+        if "work_date" in pending:
+            parsed_date = parse_date(pending["work_date"])
+            if parsed_date is None:
+                return Response(
+                    {"detail": "Pending source update contains invalid work_date."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            entry.work_date = parsed_date
+        if "hours" in pending:
+            entry.hours = Decimal(str(pending["hours"]))
+        if "notes" in pending:
+            entry.notes = pending["notes"]
+        metadata["source_change_flag"] = TimeEntrySourceChangeFlag.NONE
+        metadata.pop("source_pending_update", None)
+        entry.source_metadata = metadata
+        entry.duplicate_fingerprint = fingerprint_for_entry(entry)
+        entry.full_clean()
+        entry.save()
+        return None
 
 
 @extend_schema(tags=["Time Tracking"])
@@ -8631,7 +8595,7 @@ class JobApplicationViewSet(
         user = self.request.user
         if user.is_authenticated and is_hr_or_admin(user):
             return base
-        profile = getattr(user, "profile", None) if user.is_authenticated else None
+        profile = getattr(user, "profile", None)
         if profile is None:
             return base.none()
         # Reviewers (listing creator + managers of the hiring department)
@@ -8974,6 +8938,27 @@ class DocumentTemplateViewSet(viewsets.GenericViewSet):
     def _build_error(self, code: str, message: str, details: dict | None = None):
         return {"code": code, "message": message, "details": details or {}}
 
+    def _check_modify_permission(self, request, template, system_verb="modified", permission_verb="edit"):
+        from .enums import ErrorCode
+
+        if template.is_system_template:
+            return Response(
+                self._build_error(
+                    ErrorCode.SYSTEM_TEMPLATE_IMMUTABLE,
+                    f"System templates cannot be {system_verb}.",
+                ),
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if not self._can_edit(request, template):
+            return Response(
+                self._build_error(
+                    ErrorCode.FORBIDDEN,
+                    f"You do not have permission to {permission_verb} this template.",
+                ),
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return None
+
     # ── queryset helpers ──────────────────────────────────────────────────────
 
     def _base_queryset(self, request):
@@ -9198,26 +9183,11 @@ class DocumentTemplateViewSet(viewsets.GenericViewSet):
 
         Returns 403 for system templates or when the user lacks edit rights.
         """
-        from .enums import ErrorCode
-
         template = get_template_or_404(pk)
 
-        if template.is_system_template:
-            return Response(
-                self._build_error(
-                    ErrorCode.SYSTEM_TEMPLATE_IMMUTABLE,
-                    "System templates cannot be modified.",
-                ),
-                status=status.HTTP_403_FORBIDDEN,
-            )
-        if not self._can_edit(request, template):
-            return Response(
-                self._build_error(
-                    ErrorCode.FORBIDDEN,
-                    "You do not have permission to edit this template.",
-                ),
-                status=status.HTTP_403_FORBIDDEN,
-            )
+        error = self._check_modify_permission(request, template, system_verb="modified", permission_verb="edit")
+        if error:
+            return error
 
         serializer = DocumentTemplateCreateUpdateSerializer(
             data=request.data, context={"instance": template}
@@ -9268,26 +9238,11 @@ class DocumentTemplateViewSet(viewsets.GenericViewSet):
         Providing ``fields`` in the payload replaces all field definitions.
         Returns 403 for system templates or insufficient permissions.
         """
-        from .enums import ErrorCode
-
         template = get_template_or_404(pk)
 
-        if template.is_system_template:
-            return Response(
-                self._build_error(
-                    ErrorCode.SYSTEM_TEMPLATE_IMMUTABLE,
-                    "System templates cannot be modified.",
-                ),
-                status=status.HTTP_403_FORBIDDEN,
-            )
-        if not self._can_edit(request, template):
-            return Response(
-                self._build_error(
-                    ErrorCode.FORBIDDEN,
-                    "You do not have permission to edit this template.",
-                ),
-                status=status.HTTP_403_FORBIDDEN,
-            )
+        error = self._check_modify_permission(request, template, system_verb="modified", permission_verb="edit")
+        if error:
+            return error
 
         serializer = DocumentTemplatePartialUpdateSerializer(
             data=request.data, context={"instance": template}
@@ -9335,26 +9290,11 @@ class DocumentTemplateViewSet(viewsets.GenericViewSet):
 
         Returns 403 for system templates or when the user lacks delete rights.
         """
-        from .enums import ErrorCode
-
         template = get_template_or_404(pk)
 
-        if template.is_system_template:
-            return Response(
-                self._build_error(
-                    ErrorCode.SYSTEM_TEMPLATE_IMMUTABLE,
-                    "System templates cannot be deleted.",
-                ),
-                status=status.HTTP_403_FORBIDDEN,
-            )
-        if not self._can_edit(request, template):
-            return Response(
-                self._build_error(
-                    ErrorCode.FORBIDDEN,
-                    "You do not have permission to delete this template.",
-                ),
-                status=status.HTTP_403_FORBIDDEN,
-            )
+        error = self._check_modify_permission(request, template, system_verb="deleted", permission_verb="delete")
+        if error:
+            return error
 
         template.is_active = False
         template.save(update_fields=["is_active", "updated_at"])
@@ -9962,6 +9902,40 @@ class LeaveAnalyticsViewSet(
             return None
         return raw
 
+    @staticmethod
+    def _headcount_and_on_leave_today(department=None, user=None):
+        """Return (headcount, on_leave_today) for the given scope."""
+        if has_leave_analytics_view_permission(user):
+            headcount_qs = UserProfile.objects.all()
+            if department is not None:
+                headcount_qs = headcount_qs.filter(department=department)
+            headcount = headcount_qs.count()
+            today = timezone.now().date()
+            on_leave_qs = LeaveRequest.objects.filter(
+                status=LeaveRequestStatus.APPROVED,
+                start_date__lte=today,
+                end_date__gte=today,
+            )
+            if department is not None:
+                on_leave_qs = on_leave_qs.filter(employee__department=department)
+            on_leave_today = on_leave_qs.values("employee_id").distinct().count()
+        else:
+            profile = _get_user_profile(user)
+            headcount = 1 if profile is not None else 0
+            today = timezone.now().date()
+            on_leave_today = (
+                LeaveRequest.objects.filter(
+                    employee=profile,
+                    status=LeaveRequestStatus.APPROVED,
+                    start_date__lte=today,
+                    end_date__gte=today,
+                ).exists()
+                if profile is not None
+                else 0
+            )
+            on_leave_today = int(bool(on_leave_today))
+        return headcount, on_leave_today
+
     @extend_schema(
         tags=["Leave Analytics"],
         summary="Monthly leave trend for a given year",
@@ -10099,35 +10073,9 @@ class LeaveAnalyticsViewSet(
 
         pending_total = scope_qs.aggregate(p=models.Sum("pending_days")).get("p") or 0
 
-        if has_leave_analytics_view_permission(request.user):
-            headcount_qs = UserProfile.objects.all()
-            if department is not None:
-                headcount_qs = headcount_qs.filter(department=department)
-            headcount = headcount_qs.count()
-            today = timezone.now().date()
-            on_leave_qs = LeaveRequest.objects.filter(
-                status=LeaveRequestStatus.APPROVED,
-                start_date__lte=today,
-                end_date__gte=today,
-            )
-            if department is not None:
-                on_leave_qs = on_leave_qs.filter(employee__department=department)
-            on_leave_today = on_leave_qs.values("employee_id").distinct().count()
-        else:
-            profile = _get_user_profile(request.user)
-            headcount = 1 if profile is not None else 0
-            today = timezone.now().date()
-            on_leave_today = (
-                LeaveRequest.objects.filter(
-                    employee=profile,
-                    status=LeaveRequestStatus.APPROVED,
-                    start_date__lte=today,
-                    end_date__gte=today,
-                ).exists()
-                if profile is not None
-                else 0
-            )
-            on_leave_today = int(bool(on_leave_today))
+        headcount, on_leave_today = self._headcount_and_on_leave_today(
+            department=department, user=request.user
+        )
 
         serializer = LeaveAnalyticsYearTotalsSerializer(
             {
@@ -11047,16 +10995,7 @@ class SurveyViewSet(viewsets.ModelViewSet):
         )
 
     def _user_is_hr_or_staff(self, request) -> bool:
-        if getattr(request.user, "is_staff", False) or getattr(
-            request.user, "is_superuser", False
-        ):
-            return True
-        try:
-            profile = request.user.profile
-        except (AttributeError, UserProfile.DoesNotExist):
-            return False
-        role = getattr(profile, "role", None)
-        return bool(role and role.name and "hr" in role.name.lower())
+        return _is_hr_or_staff(request)
 
     @extend_schema(
         summary="Get aggregated survey analytics",
@@ -11831,6 +11770,33 @@ class JiraOAuthDisconnectView(APIView):
         return Response(status=_drf_status.HTTP_204_NO_CONTENT)
 
 
+def _parse_sync_dates(request_data, default_from, today):
+    """Return (date_from, date_to, error_response). error_response is None if OK."""
+    from datetime import date
+    try:
+        date_from = (
+            date.fromisoformat(request_data["date_from"])
+            if request_data.get("date_from")
+            else default_from
+        )
+        date_to = (
+            date.fromisoformat(request_data["date_to"])
+            if request_data.get("date_to")
+            else today
+        )
+    except (TypeError, ValueError):
+        return None, None, Response(
+            {"detail": "date_from / date_to must be ISO dates (YYYY-MM-DD)."},
+            status=_drf_status.HTTP_400_BAD_REQUEST,
+        )
+    if date_from > date_to:
+        return None, None, Response(
+            {"detail": "date_from must be <= date_to."},
+            status=_drf_status.HTTP_400_BAD_REQUEST,
+        )
+    return date_from, date_to, None
+
+
 @extend_schema(tags=["Time Tracking"])
 class JiraSyncView(APIView):
     """POST /api/time-integrations/jira/sync/ — pull and commit Jira worklogs for the
@@ -11870,27 +11836,9 @@ class JiraSyncView(APIView):
             if connection.last_synced_at
             else today - _timedelta(days=30)
         )
-        try:
-            date_from = (
-                _date.fromisoformat(request.data["date_from"])
-                if request.data.get("date_from")
-                else default_from
-            )
-            date_to = (
-                _date.fromisoformat(request.data["date_to"])
-                if request.data.get("date_to")
-                else today
-            )
-        except (TypeError, ValueError):
-            return Response(
-                {"detail": "date_from / date_to must be ISO dates (YYYY-MM-DD)."},
-                status=_drf_status.HTTP_400_BAD_REQUEST,
-            )
-        if date_from > date_to:
-            return Response(
-                {"detail": "date_from must be <= date_to."},
-                status=_drf_status.HTTP_400_BAD_REQUEST,
-            )
+        date_from, date_to, error = _parse_sync_dates(request.data, default_from, today)
+        if error:
+            return error
 
         filters = JiraImportFilters(
             date_from=date_from,
@@ -12116,27 +12064,9 @@ class TempoSyncView(APIView):
 
         today = _date.today()
         default_from = today - _timedelta(days=30)
-        try:
-            date_from = (
-                _date.fromisoformat(request.data["date_from"])
-                if request.data.get("date_from")
-                else default_from
-            )
-            date_to = (
-                _date.fromisoformat(request.data["date_to"])
-                if request.data.get("date_to")
-                else today
-            )
-        except (TypeError, ValueError):
-            return Response(
-                {"detail": "date_from / date_to must be ISO dates (YYYY-MM-DD)."},
-                status=_drf_status.HTTP_400_BAD_REQUEST,
-            )
-        if date_from > date_to:
-            return Response(
-                {"detail": "date_from must be <= date_to."},
-                status=_drf_status.HTTP_400_BAD_REQUEST,
-            )
+        date_from, date_to, error = _parse_sync_dates(request.data, default_from, today)
+        if error:
+            return error
 
         filters = TempoImportFilters(
             date_from=date_from,
