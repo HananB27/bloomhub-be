@@ -140,12 +140,59 @@ from core.utils import (
 )
 
 
+class CaseInsensitiveChoiceField(serializers.ChoiceField):
+    """ChoiceField accepting case-insensitive values and selected aliases."""
+
+    def __init__(self, *args, aliases: dict[str, str] | None = None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._normalized_choices = {
+            self._normalize(key): key for key in self.choices.keys()
+        }
+        self._aliases = {
+            self._normalize(alias): value for alias, value in (aliases or {}).items()
+        }
+
+    @staticmethod
+    def _normalize(value: Any) -> str:
+        return str(value).strip().lower().replace(" ", "_").replace("-", "_")
+
+    def to_internal_value(self, data):
+        if data == "" and self.allow_blank:
+            return ""
+        if isinstance(data, str):
+            normalized = self._normalize(data)
+            if normalized in self._aliases:
+                return self._aliases[normalized]
+            if normalized in self._normalized_choices:
+                return self._normalized_choices[normalized]
+        return super().to_internal_value(data)
+
+
+ASSET_CATEGORY_ALIASES = {
+    "laptop": AssetCategory.LAPTOPS,
+    "phone": AssetCategory.PHONES,
+    "monitor": AssetCategory.MONITORS,
+    "headphone": AssetCategory.HEADPHONES,
+    "camera": AssetCategory.CAMERAS,
+    "vehicle": AssetCategory.VEHICLES,
+}
+
+
 @extend_schema_field(OpenApiTypes.INT64)
 class NonNegativeInt64Field(serializers.IntegerField):
     """Non-negative integers documented as OpenAPI int64 (stable across environments)."""
 
     def __init__(self, **kwargs):
         kwargs.setdefault("min_value", 0)
+        super().__init__(**kwargs)
+
+
+class NonNegativeInt32Field(serializers.IntegerField):
+    """Non-negative integers backed by Django PositiveIntegerField."""
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault("min_value", 0)
+        kwargs.setdefault("max_value", 2147483647)
         super().__init__(**kwargs)
 
 
@@ -1860,6 +1907,17 @@ class UserProfileSerializer(serializers.ModelSerializer):
 class AssetSerializer(serializers.ModelSerializer):
     """Serializer for Asset model"""
 
+    category = CaseInsensitiveChoiceField(
+        choices=AssetCategory.choices,
+        aliases=ASSET_CATEGORY_ALIASES,
+        required=False,
+        default=AssetCategory.OTHER,
+    )
+    condition = CaseInsensitiveChoiceField(
+        choices=AssetCondition.choices,
+        required=False,
+        default=AssetCondition.GOOD,
+    )
     current_assignment = serializers.SerializerMethodField()
     is_under_warranty = serializers.SerializerMethodField()
     is_available = serializers.SerializerMethodField()
@@ -2254,6 +2312,18 @@ class ScheduledMaintenanceCancelSerializer(serializers.Serializer):
 
 class AssetCreateSerializer(serializers.ModelSerializer):
     """Simplified serializer for creating assets"""
+
+    category = CaseInsensitiveChoiceField(
+        choices=AssetCategory.choices,
+        aliases=ASSET_CATEGORY_ALIASES,
+        required=False,
+        default=AssetCategory.OTHER,
+    )
+    condition = CaseInsensitiveChoiceField(
+        choices=AssetCondition.choices,
+        required=False,
+        default=AssetCondition.GOOD,
+    )
 
     class Meta:
         model = Asset
@@ -3937,6 +4007,16 @@ class PeerSessionListSerializer(serializers.ModelSerializer):
     employee_name = serializers.CharField(
         source="employee.user.get_full_name", read_only=True
     )
+    duration_minutes = NonNegativeInt32Field(
+        allow_null=True,
+        required=False,
+        help_text="Duration of the session in minutes",
+    )
+    incentive_id = NonNegativeInt32Field(
+        allow_null=True,
+        required=False,
+        help_text="Reference to associated incentive (FK when model exists)",
+    )
 
     class Meta:
         model = PeerSession
@@ -3968,6 +4048,16 @@ class PeerSessionDetailSerializer(serializers.ModelSerializer):
     employee_name = serializers.CharField(
         source="employee.user.get_full_name", read_only=True
     )
+    duration_minutes = NonNegativeInt32Field(
+        allow_null=True,
+        required=False,
+        help_text="Duration of the session in minutes",
+    )
+    incentive_id = NonNegativeInt32Field(
+        allow_null=True,
+        required=False,
+        help_text="Reference to associated incentive (FK when model exists)",
+    )
 
     class Meta:
         model = PeerSession
@@ -3994,6 +4084,17 @@ class PeerSessionDetailSerializer(serializers.ModelSerializer):
 
 class PeerSessionCreateUpdateSerializer(serializers.ModelSerializer):
     """Serializer used for creating/updating peer sessions."""
+
+    duration_minutes = NonNegativeInt32Field(
+        allow_null=True,
+        required=False,
+        help_text="Duration of the session in minutes",
+    )
+    incentive_id = NonNegativeInt32Field(
+        allow_null=True,
+        required=False,
+        help_text="Reference to associated incentive (FK when model exists)",
+    )
 
     class Meta:
         model = PeerSession
@@ -4613,6 +4714,9 @@ class TrainingBudgetSerializer(serializers.ModelSerializer):
     employee_name = serializers.CharField(
         source="employee.user.get_full_name", read_only=True
     )
+    fiscal_year = NonNegativeInt32Field(
+        help_text="Fiscal year for which budget is allocated"
+    )
     remaining_budget = serializers.ReadOnlyField()
     budget_percentage_used = serializers.ReadOnlyField()
     threshold_reached = serializers.SerializerMethodField()
@@ -5066,6 +5170,8 @@ class BenefitCatalogSerializer(serializers.ModelSerializer):
 
 class QuestionSerializer(serializers.ModelSerializer):
     """A question within a survey. Used nested inside SurveySerializer."""
+
+    order = NonNegativeInt32Field(required=False)
 
     class Meta:
         model = Question

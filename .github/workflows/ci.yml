@@ -49,7 +49,15 @@ jobs:
 
       - name: schema.yaml matches committed export
         run: |
-          git diff --exit-code schema.yaml || {
+          git ls-files --error-unmatch schema.yaml >/dev/null || {
+            echo "schema.yaml must be committed"
+            exit 1
+          }
+          test -f schema.yaml || {
+            echo "schema.yaml must exist"
+            exit 1
+          }
+          git diff --exit-code -- schema.yaml || {
             echo "Run: python manage.py spectacular --file schema.yaml && git add schema.yaml"
             exit 1
           }

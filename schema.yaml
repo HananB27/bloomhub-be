@@ -2757,6 +2757,17 @@ paths:
                                                  exists, return single object)
       tags:
       - cpf-levels
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedCPFLevelRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedCPFLevelRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedCPFLevelRequest'
       security:
       - jwtAuth: []
       responses:
@@ -2816,6 +2827,17 @@ paths:
         required: true
       tags:
       - cpf-levels
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedCPFLevelRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedCPFLevelRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedCPFLevelRequest'
       security:
       - jwtAuth: []
       responses:
@@ -13214,10 +13236,10 @@ components:
           maxLength: 200
         category:
           type: string
-          description: Asset category
+          default: other
         condition:
           type: string
-          description: Current condition of the asset
+          default: good
         warranty_until:
           type: string
           format: date
@@ -13317,10 +13339,10 @@ components:
           maxLength: 200
         category:
           type: string
-          description: Asset category
+          default: other
         condition:
           type: string
-          description: Current condition of the asset
+          default: good
         warranty_until:
           type: string
           format: date
@@ -13411,10 +13433,10 @@ components:
           maxLength: 200
         category:
           type: string
-          description: Asset category
+          default: other
         condition:
           type: string
-          description: Current condition of the asset
+          default: good
         warranty_until:
           type: string
           format: date
@@ -16942,10 +16964,10 @@ components:
           maxLength: 200
         category:
           type: string
-          description: Asset category
+          default: other
         condition:
           type: string
-          description: Current condition of the asset
+          default: good
         warranty_until:
           type: string
           format: date
@@ -17068,6 +17090,17 @@ components:
           nullable: true
         notes:
           type: string
+    PatchedCPFLevelRequest:
+      type: object
+      properties:
+        display_name:
+          type: string
+          nullable: true
+          maxLength: 200
+        career_level:
+          type: string
+          nullable: true
+          maxLength: 100
     PatchedCertificateCreateUpdateRequest:
       type: object
       description: Writable serializer for certificate uploads.

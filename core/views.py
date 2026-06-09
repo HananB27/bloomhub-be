@@ -2341,6 +2341,7 @@ class CPFLevelListView(APIView):
     """
 
     permission_classes = [IsAuthenticated]
+    serializer_class = CPFLevelSerializer
 
     @extend_schema(
         tags=["cpf-levels"],

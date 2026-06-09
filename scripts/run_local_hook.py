@@ -44,6 +44,14 @@ def main() -> int:
             "--file",
             "schema.yaml",
         ]
+        completed = subprocess.run(command, cwd=repo_root)
+        if completed.returncode != 0:
+            return completed.returncode
+        schema_path = repo_root / "schema.yaml"
+        if not schema_path.exists():
+            print("schema.yaml was not generated.")
+            return 1
+        return subprocess.run(["git", "add", "schema.yaml"], cwd=repo_root).returncode
     elif hook_name == "pytest":
         command = [python_bin, "-m", "pytest"]
     elif hook_name == "pytest-changed":

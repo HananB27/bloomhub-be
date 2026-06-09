@@ -2293,6 +2293,28 @@ class AssetManagementAPITest(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response.data["category"], AssetCategory.PHONES)
 
+    def test_asset_create_accepts_case_insensitive_category_and_condition(self):
+        """Category aliases and condition capitalization normalize to stored values."""
+        response = self.client.post(
+            "/api/assets/",
+            {
+                "asset_id": "CATCASE01",
+                "name": "Mixed Case Laptop",
+                "category": "LapTop",
+                "condition": "GOOD",
+                "purchase_date": str(date.today() - timedelta(days=7)),
+                "status": AssetStatus.ACTIVE,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["category"], AssetCategory.LAPTOPS)
+        self.assertEqual(response.data["condition"], AssetCondition.GOOD)
+        asset = Asset.objects.get(asset_id="CATCASE01")
+        self.assertEqual(asset.category, AssetCategory.LAPTOPS)
+        self.assertEqual(asset.condition, AssetCondition.GOOD)
+
     def test_asset_create_defaults_category_to_other(self):
         """Creating an asset without category should use the default category."""
         response = self.client.post(
