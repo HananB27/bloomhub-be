@@ -187,6 +187,15 @@ class NonNegativeInt64Field(serializers.IntegerField):
         super().__init__(**kwargs)
 
 
+class NonNegativeInt32Field(serializers.IntegerField):
+    """Non-negative integers backed by Django PositiveIntegerField."""
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault("min_value", 0)
+        kwargs.setdefault("max_value", 2147483647)
+        super().__init__(**kwargs)
+
+
 class GoogleExchangeSerializer(serializers.Serializer):
     id_token = serializers.CharField(required=True)
 
@@ -3998,6 +4007,16 @@ class PeerSessionListSerializer(serializers.ModelSerializer):
     employee_name = serializers.CharField(
         source="employee.user.get_full_name", read_only=True
     )
+    duration_minutes = NonNegativeInt32Field(
+        allow_null=True,
+        required=False,
+        help_text="Duration of the session in minutes",
+    )
+    incentive_id = NonNegativeInt32Field(
+        allow_null=True,
+        required=False,
+        help_text="Reference to associated incentive (FK when model exists)",
+    )
 
     class Meta:
         model = PeerSession
@@ -4029,6 +4048,16 @@ class PeerSessionDetailSerializer(serializers.ModelSerializer):
     employee_name = serializers.CharField(
         source="employee.user.get_full_name", read_only=True
     )
+    duration_minutes = NonNegativeInt32Field(
+        allow_null=True,
+        required=False,
+        help_text="Duration of the session in minutes",
+    )
+    incentive_id = NonNegativeInt32Field(
+        allow_null=True,
+        required=False,
+        help_text="Reference to associated incentive (FK when model exists)",
+    )
 
     class Meta:
         model = PeerSession
@@ -4055,6 +4084,17 @@ class PeerSessionDetailSerializer(serializers.ModelSerializer):
 
 class PeerSessionCreateUpdateSerializer(serializers.ModelSerializer):
     """Serializer used for creating/updating peer sessions."""
+
+    duration_minutes = NonNegativeInt32Field(
+        allow_null=True,
+        required=False,
+        help_text="Duration of the session in minutes",
+    )
+    incentive_id = NonNegativeInt32Field(
+        allow_null=True,
+        required=False,
+        help_text="Reference to associated incentive (FK when model exists)",
+    )
 
     class Meta:
         model = PeerSession
@@ -4674,6 +4714,9 @@ class TrainingBudgetSerializer(serializers.ModelSerializer):
     employee_name = serializers.CharField(
         source="employee.user.get_full_name", read_only=True
     )
+    fiscal_year = NonNegativeInt32Field(
+        help_text="Fiscal year for which budget is allocated"
+    )
     remaining_budget = serializers.ReadOnlyField()
     budget_percentage_used = serializers.ReadOnlyField()
     threshold_reached = serializers.SerializerMethodField()
@@ -5127,6 +5170,8 @@ class BenefitCatalogSerializer(serializers.ModelSerializer):
 
 class QuestionSerializer(serializers.ModelSerializer):
     """A question within a survey. Used nested inside SurveySerializer."""
+
+    order = NonNegativeInt32Field(required=False)
 
     class Meta:
         model = Question
