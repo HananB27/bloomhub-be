@@ -4,7 +4,7 @@
 ## Product Purpose
 
 - Maintained repository: `HananB27/bloomhub-be`.
-- BloomHub Backend is a Django-based web backend providing REST APIs, including potential LLM integration via LangChain, for the BloomHub application. (auto-detected, confidence 60%; verify)
+- A Django backend for a BloomHub application, providing a web API with optional AI/LLM integration and multi-tenant support. (auto-detected, confidence 70%; verify)
 - Review and edit this draft before merging; merging makes these rules source truth.
 
 ## Constitution Files
